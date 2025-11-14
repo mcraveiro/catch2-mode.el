@@ -363,7 +363,7 @@ Return a plist with combined totals across all test suites."
                                                       '(:foreground "red" :weight bold)
                                                     'default))
                                   (if mod-time
-                                      (format-time-string "%m-%d %H:%M" mod-time)
+                                      (format-time-string "%Y-%m-%d %H:%M" mod-time)
                                     "N/A")))))
                        summaries)
                (list (list "TOTALS" ; key for totals row
