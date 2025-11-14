@@ -310,12 +310,11 @@ Return a plist with combined totals across all test suites."
   "Major mode for viewing Catch2 test suites in a tabulated list."
   (setq tabulated-list-format
         [("Status" 8 t)
-         ("Suite Name" 30 t)
+         ("Suite Name" 40 t)
          ("Tests" 8 t :right-align t)
          ("Duration" 12 t :right-align t)
          ("Fails" 8 t :right-align t)
-         ("Modified" 16 t)
-         ("Tags" 30 t)])
+         ("Modified" 16 t)])
   (setq tabulated-list-padding 2)
   (setq tabulated-list-sort-key (cons "Suite Name" nil))
   (tabulated-list-init-header)
@@ -348,8 +347,7 @@ Return a plist with combined totals across all test suites."
               (append
                (mapcar (lambda (summary)
                          (let ((fail-count (plist-get summary :fail-count))
-                               (mod-time (plist-get summary :modification-time))
-                               (tags (plist-get summary :tags)))
+                               (mod-time (plist-get summary :modification-time)))
                            (list (plist-get summary :suite-name) ; key
                                  (vector
                                   (propertize
@@ -366,8 +364,7 @@ Return a plist with combined totals across all test suites."
                                                     'default))
                                   (if mod-time
                                       (format-time-string "%m-%d %H:%M" mod-time)
-                                    "N/A")
-                                  (or tags "")))))
+                                    "N/A")))))
                        summaries)
                (list (list "TOTALS" ; key for totals row
                            (let ((total-fail-count (plist-get totals-summary :fail-count)))
@@ -386,8 +383,7 @@ Return a plist with combined totals across all test suites."
                                          'face (if (> total-fail-count 0)
                                                  '(:foreground "red" :weight bold :height 1.1)
                                                '(:weight bold :height 1.1)))
-                              "" ; Empty for modification time in totals row
-                              "")))))) ; Empty for tags in totals row
+                              "")))))) ; Empty for modification time in totals row
 
         (tabulated-list-print)
         (switch-to-buffer (current-buffer))))))
