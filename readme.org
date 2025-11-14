@@ -1,0 +1,9 @@
+* Catch2 Mode
+
+Very simple emacs mode to display Catch2 unit tests. Displays the overview at
+the test suite level and allows you to drill down into individual test cases.
+You can navigate to the source code location for the test with =f= and, if
+you follow our approach for naming logs, you can also open the log file
+associated with the test.
+
+[[./main-screen.png]]
