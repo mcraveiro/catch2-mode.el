@@ -318,6 +318,7 @@ Return a plist with combined totals across all test suites."
     (set-keymap-parent map tabulated-list-mode-map)
     (define-key map (kbd "g") 'catch2-testcases-reload)
     (define-key map (kbd "t") 'catch2-testcases-open-file)
+    (define-key map (kbd "l") 'catch2-testcases-open-log)
     map))
 
 (defvar catch2-tabulated-mode-hook nil
@@ -332,6 +333,37 @@ Return a plist with combined totals across all test suites."
   "Reload the current test cases view."
   (interactive)
   (catch2-tabulated-view-suite))
+
+(defun catch2-testcases-open-log ()
+  "Open the log file for the test case at point."
+  (interactive)
+  (let* ((test-name (tabulated-list-get-id))
+         (suites (catch2-parse-all-suites))
+         (found-case nil)
+         (found-suite nil))
+
+    ;; Find the test case and its suite
+    (cl-loop for suite in suites
+             for cases = (plist-get suite :cases)
+             do (cl-loop for case in cases
+                         when (string= (plist-get case :name) test-name)
+                         do (setq found-case case)
+                         and do (setq found-suite suite)
+                         and return t)
+             when found-case
+             return t)
+
+    (if (and found-case found-suite)
+        (let* ((xml-file (plist-get found-suite :file))
+               (suite-name (plist-get found-suite :name))
+               (log-file (catch2-find-log-file xml-file suite-name test-name)))
+          (if log-file
+              (progn
+                (find-file log-file)
+                (goto-char (point-max))
+                (message "Opened log file: %s" log-file))
+            (message "No log file found for test case: %s" test-name)))
+      (message "Test case not found: %s" test-name))))
 
 (define-derived-mode catch2-tabulated-mode tabulated-list-mode "Catch2 Suites"
   "Major mode for viewing Catch2 test suites in a tabulated list."
@@ -507,6 +539,25 @@ CASES is a list of test case plists, SUITE-NAME is the name of the suite."
           (goto-char (point-min))
           (forward-line (1- line)))
       (message "No file location available for this test case"))))
+
+(defun catch2-find-log-file (xml-file test-suite-name test-case-name)
+  "Find the log file for a test case.
+XML-FILE is the path to the XML results file.
+TEST-SUITE-NAME is the name of the test suite.
+TEST-CASE-NAME is the name of the test case.
+Returns the path to the log file or nil if not found."
+  (let* ((xml-dir (file-name-directory xml-file))
+         (log-dir (expand-file-name "../log" xml-dir))
+         (suite-log-dir (expand-file-name test-suite-name log-dir))
+         (log-pattern (format "%s*.log" test-case-name))
+         (log-files (when (file-exists-p suite-log-dir)
+                      (directory-files-recursively suite-log-dir log-pattern))))
+    (catch2--debug "Looking for log file: XML=%s, suite=%s, test=%s" xml-file test-suite-name test-case-name)
+    (catch2--debug "Log directory: %s" suite-log-dir)
+    (catch2--debug "Log pattern: %s" log-pattern)
+    (catch2--debug "Found log files: %S" log-files)
+
+    (car log-files))) ; Return the first matching log file
 
 ;;
 ;; Testing
