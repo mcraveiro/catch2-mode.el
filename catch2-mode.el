@@ -42,7 +42,7 @@
   :type 'string
   :group 'catch2-mode)
 
-(defcustom catch2-project-name "Catch2 Tests"
+(defcustom catch2-project-name "Catch2 Test Suites"
   "Default project name to show in the buffer."
   :type 'string
   :group 'catch2-mode)
@@ -342,7 +342,7 @@ Return a plist with combined totals across all test suites."
          (suites (catch2-parse-all-suites))
          (summaries (catch2-generate-suite-summaries suites))
          (totals-summary (catch2-generate-totals-summary summaries))
-         (buffer-name (format "*%s: %s*" catch2-project-name project-name)))
+         (buffer-name (format "*%s %s*" catch2-project-name project-name)))
 
     (catch2--debug "Displaying %d suites + totals in buffer: %s" (length summaries) buffer-name)
 
@@ -364,30 +364,30 @@ Return a plist with combined totals across all test suites."
                                   (propertize
                                    (if (eq status 'pass) "✓ PASS" "✗ FAIL")
                                    'face (if (eq status 'pass)
-                                           '(:foreground "green" :weight bold)
-                                         '(:foreground "red" :weight bold)))
+                                           '(:foreground "light green" :weight bold)
+                                         '(:foreground "indian red" :weight bold)))
                                   (propertize suite-name
                                              'face (if (eq status 'pass)
-                                                     '(:foreground "green" :weight bold)
-                                                   '(:foreground "red" :weight bold)))
+                                                     '(:foreground "light green" :weight bold)
+                                                   '(:foreground "indian red" :weight bold)))
                                   (propertize (number-to-string (plist-get summary :test-count))
                                              'face (if (eq status 'pass)
-                                                     '(:foreground "green" :weight bold)
-                                                   '(:foreground "red" :weight bold)))
+                                                     '(:foreground "light green" :weight bold)
+                                                   '(:foreground "indian red" :weight bold)))
                                   (propertize (format "%.3fs" (plist-get summary :durationInSeconds))
                                              'face (if (eq status 'pass)
-                                                     '(:foreground "green" :weight bold)
-                                                   '(:foreground "red" :weight bold)))
+                                                     '(:foreground "light green" :weight bold)
+                                                   '(:foreground "indian red" :weight bold)))
                                   (propertize (number-to-string fail-count)
                                              'face (if (eq status 'pass)
-                                                     '(:foreground "green" :weight bold)
-                                                   '(:foreground "red" :weight bold)))
+                                                     '(:foreground "light green" :weight bold)
+                                                   '(:foreground "indian red" :weight bold)))
                                   (propertize (if mod-time
                                                   (format-time-string "%Y-%m-%d %H:%M" mod-time)
                                                 "N/A")
                                              'face (if (eq status 'pass)
-                                                     '(:foreground "green" :weight bold)
-                                                   '(:foreground "red" :weight bold)))))))
+                                                     '(:foreground "light green" :weight bold)
+                                                   '(:foreground "indian red" :weight bold)))))))
                        summaries)
                (list (list "TOTALS" ; key for totals row
                            (let ((total-fail-count (plist-get totals-summary :fail-count))
@@ -397,39 +397,111 @@ Return a plist with combined totals across all test suites."
                               (propertize
                                (if (eq total-status 'pass) "✓ PASS" "✗ FAIL")
                                'face (if (eq total-status 'pass)
-                                       '(:foreground "green" :weight bold :height 1.1)
-                                     '(:foreground "red" :weight bold :height 1.1)))
+                                       '(:foreground "light green" :weight bold :height 1.1)
+                                     '(:foreground "indian red" :weight bold :height 1.1)))
                               (propertize "TOTALS"
                                          'face (if (eq total-status 'pass)
-                                                 '(:foreground "green" :weight bold :height 1.1)
-                                               '(:foreground "red" :weight bold :height 1.1)))
+                                                 '(:foreground "light green" :weight bold :height 1.1)
+                                               '(:foreground "indian red" :weight bold :height 1.1)))
                               (propertize (number-to-string (plist-get totals-summary :test-count))
                                          'face (if (eq total-status 'pass)
-                                                 '(:foreground "green" :weight bold :height 1.1)
-                                               '(:foreground "red" :weight bold :height 1.1)))
+                                                 '(:foreground "light green" :weight bold :height 1.1)
+                                               '(:foreground "indian red" :weight bold :height 1.1)))
                               (propertize (format "%.3fs" (plist-get totals-summary :durationInSeconds))
                                          'face (if (eq total-status 'pass)
-                                                 '(:foreground "green" :weight bold :height 1.1)
-                                               '(:foreground "red" :weight bold :height 1.1)))
+                                                 '(:foreground "light green" :weight bold :height 1.1)
+                                               '(:foreground "indian red" :weight bold :height 1.1)))
                               (propertize (number-to-string total-fail-count)
                                          'face (if (eq total-status 'pass)
-                                                 '(:foreground "green" :weight bold :height 1.1)
-                                               '(:foreground "red" :weight bold :height 1.1)))
+                                                 '(:foreground "light green" :weight bold :height 1.1)
+                                               '(:foreground "indian red" :weight bold :height 1.1)))
                               (propertize (if oldest-mod-time
                                               (format-time-string "%Y-%m-%d %H:%M" oldest-mod-time)
                                             "N/A")
                                          'face (if (eq total-status 'pass)
-                                                 '(:foreground "green" :weight bold :height 1.1)
-                                               '(:foreground "red" :weight bold :height 1.1)))))))))
+                                                 '(:foreground "light green" :weight bold :height 1.1)
+                                               '(:foreground "indian red" :weight bold :height 1.1)))))))))
 
         (tabulated-list-print)
         (switch-to-buffer (current-buffer))))))
+
+(define-derived-mode catch2-testcases-mode tabulated-list-mode "Catch2 Test Cases"
+  "Major mode for viewing Catch2 test cases in a tabulated list."
+  (setq tabulated-list-format
+        [("Status" 8 t)
+         ("Test Name" 50 t)
+         ("Duration" 12 t :right-align t)
+         ("File" 30 t)
+         ("Line" 6 t :right-align t)])
+  (setq tabulated-list-padding 2)
+  (setq tabulated-list-sort-key (cons "Test Name" nil))
+  (tabulated-list-init-header)
+  (run-hooks 'catch2-tabulated-mode-hook))
 
 (defun catch2-tabulated-view-suite ()
   "View details of the test suite at point."
   (interactive)
   (let ((suite-name (tabulated-list-get-id)))
-    (message "Viewing suite: %s" suite-name)))
+    (if suite-name
+        (let ((suites (catch2-parse-all-suites))
+              (found nil))
+          (if (string= suite-name "TOTALS")
+              ;; Show all test cases from all suites
+              (let ((all-cases (cl-loop for suite in suites
+                                      append (plist-get suite :cases))))
+                (catch2-display-testcases all-cases "ALL SUITES"))
+            ;; Show test cases for specific suite
+            (dolist (suite suites)
+              (when (string= (plist-get suite :name) suite-name)
+                (setq found suite)
+                (catch2-display-testcases (plist-get suite :cases) suite-name)))
+            (unless found
+              (message "Suite '%s' not found" suite-name)))
+      (message "No suite at point")))))
+
+(defun catch2-display-testcases (cases suite-name)
+  "Display test cases in a tabulated list buffer.
+CASES is a list of test case plists, SUITE-NAME is the name of the suite."
+  (let ((buffer-name (format "*Catch2 Tests: %s*" suite-name)))
+    (with-current-buffer (get-buffer-create buffer-name)
+      (catch2-testcases-mode)
+
+      (setq tabulated-list-entries
+            (mapcar (lambda (case)
+                      (let ((name (plist-get case :name))
+                            (success (plist-get case :success))
+                            (duration (plist-get case :durationInSeconds))
+                            (filename (plist-get case :filename))
+                            (line (plist-get case :line)))
+                        (list name ; key
+                              (vector
+                               (propertize
+                                (if success "✓ PASS" "✗ FAIL")
+                                'face (if success
+                                        '(:foreground "light green" :weight bold)
+                                      '(:foreground "indian red" :weight bold)))
+                               (propertize name
+                                          'face (if success
+                                                  '(:foreground "light green" :weight bold)
+                                                '(:foreground "indian red" :weight bold)))
+                               (propertize (format "%.3fs" (or duration 0.0))
+                                          'face (if success
+                                                  '(:foreground "light green" :weight bold)
+                                                '(:foreground "indian red" :weight bold)))
+                               (propertize (or filename "N/A")
+                                          'face (if success
+                                                  '(:foreground "light green" :weight bold)
+                                                '(:foreground "indian red" :weight bold)))
+                               (propertize (if (and line (> line 0))
+                                               (number-to-string line)
+                                             "N/A")
+                                          'face (if success
+                                                  '(:foreground "light green" :weight bold)
+                                                  '(:foreground "indian red" :weight bold)))))))
+                    cases))
+
+      (tabulated-list-print)
+      (switch-to-buffer (current-buffer)))))
 
 ;;
 ;; Testing
