@@ -34,16 +34,22 @@
   :group 'tools
   :prefix "catch2-")
 
+;;
+;; Variables
+;;
 (defcustom catch2-xml-file-pattern "test-results-*.tests.xml"
   "Pattern to match Catch2 XML test result files."
   :type 'string
   :group 'catch2-mode)
 
-(defcustom catch2-project-name "Catch2 Tests: "
+(defcustom catch2-project-name "Catch2 Tests"
   "Default project name to show in the buffer."
   :type 'string
   :group 'catch2-mode)
 
+;;
+;; Debugging
+;;
 (defvar catch2-debug-enabled t
   "When non-nil, enable debug logging for Catch2 functions.")
 
@@ -60,7 +66,9 @@ FORMAT-STRING and ARGS are passed to `format'."
                       (format-time-string "%Y-%m-%dT%H:%M:%S.%3N")
                       (apply #'format format-string args))))))
 
-
+;;
+;; Files
+;;
 (defun catch2-locate-xml-files (&optional directory)
   "Locate all Catch2 XML test files in DIRECTORY recursively.
 Returns a list of absolute file paths."
@@ -85,6 +93,9 @@ Returns a list of absolute file paths."
         (error "No Catch2 XML files found matching pattern: %s in %s"
                catch2-xml-file-pattern search-dir)))))
 
+;;
+;; Parsing
+;;
 (defun catch2-parse-tags (tags-string)
   "Parse TAGS-STRING from Catch2 XML into a list of tag strings.
 Input: \"[handler][messaging][#messaging_risk_message_handler_tests]\"
@@ -101,43 +112,15 @@ Output: (\"handler\" \"messaging\" \"messaging_risk_message_handler_tests\")"
 
 (defun catch2-parse-testcase (case-node xml-file)
   "Parse a <TestCase> element CASE-NODE from XML-FILE.
-Return plist (:name STRING :result BOOLEAN :file XML-FILE :tags
-LIST :filename STRING :line NUMBER)."
-  (let* ((attrs (xml-node-attributes case-node))
-         (case-name (cdr (assq 'name attrs)))
-         (tags (catch2-parse-tags (cdr (assq 'tags attrs))))
-         (filename (cdr (assq 'filename attrs)))
-         (line (string-to-number (or (cdr (assq 'line attrs)) "0")))
-         (children (xml-node-children case-node))
-         result)
-
-    ;; Find <OverallResult success="...">
-    (dolist (child children)
-      (when (and (consp child)
-                 (eq (car child) 'OverallResult))
-        (setq result (string= (cdr (assq 'success (xml-node-attributes child)))
-                              "true"))))
-
-    (catch2--debug "Parsed test case: %s (result: %s, tags: %S)" case-name result tags)
-
-    `(:name ,case-name
-      :result ,result
-      :file ,xml-file
-      :tags ,tags
-      :filename ,filename
-      :line ,line)))
-
-(defun catch2-parse-testcase (case-node xml-file)
-  "Parse a <TestCase> element CASE-NODE from XML-FILE.
 Return plist with all test case attributes and overall result data."
   (let* ((attrs (xml-node-attributes case-node))
-         (case-name (cdr (assq 'name attrs)))
+         (name (cdr (assq 'name attrs)))
          (tags (catch2-parse-tags (cdr (assq 'tags attrs))))
          (filename (cdr (assq 'filename attrs)))
          (line (string-to-number (or (cdr (assq 'line attrs)) "0")))
          (children (xml-node-children case-node))
-         result
-         duration
+         success
+         durationInSeconds
          skips)
 
     ;; Find <OverallResult> element
@@ -145,22 +128,22 @@ Return plist with all test case attributes and overall result data."
       (when (and (consp child)
                  (eq (car child) 'OverallResult))
         (let ((result-attrs (xml-node-attributes child)))
-          (setq result (string= (cdr (assq 'success result-attrs)) "true"))
-          (setq duration (string-to-number
-                          (or (cdr (assq 'durationInSeconds result-attrs)) "0.0")))
+          (setq success (string= (cdr (assq 'success result-attrs)) "true"))
+          (setq durationInSeconds (string-to-number
+                                   (or (cdr (assq 'durationInSeconds result-attrs)) "0.0")))
           (setq skips (string-to-number
                        (or (cdr (assq 'skips result-attrs)) "0"))))))
 
-    (catch2--debug "Parsed test case: %s (result: %s, duration: %.3fs, skips: %d, tags: %S)"
-                   case-name result duration skips tags)
+    (catch2--debug "Parsed test case: %s (success: %s, durationInSeconds: %.3fs, skips: %d, tags: %S)"
+                   name success durationInSeconds skips tags)
 
-    `(:name ,case-name
-      :result ,result
+    `(:name ,name
+      :success ,success
       :file ,xml-file
       :tags ,tags
       :filename ,filename
       :line ,line
-      :duration ,duration
+      :durationInSeconds ,durationInSeconds
       :skips ,skips
       :raw-attrs ,attrs)))
 
@@ -173,7 +156,7 @@ Return plist with all suite attributes and test cases."
                 (xml-parse-region (point-min) (point-max))))
          (root (car xml)) ;; <Catch2TestRun ...>
          (attrs (xml-node-attributes root))
-         (suite-name (cdr (assq 'name attrs)))
+         (name (cdr (assq 'name attrs)))
          (rng-seed (cdr (assq 'rng-seed attrs)))
          (xml-format-version (cdr (assq 'xml-format-version attrs)))
          (catch2-version (cdr (assq 'catch2-version attrs)))
@@ -192,7 +175,7 @@ Return plist with all suite attributes and test cases."
        ((and (consp node) (eq (car node) 'OverallResultsCases))
         (setq overall-results-cases (xml-node-attributes node)))))
 
-    (let ((suite-plist `(:suite ,suite-name
+    (let ((suite-plist `(:name ,name
                         :cases ,(nreverse cases)
                         :file ,xml-file
                         :rng-seed ,rng-seed
@@ -201,16 +184,146 @@ Return plist with all suite attributes and test cases."
                         :overall-results ,overall-results
                         :overall-results-cases ,overall-results-cases
                         :raw-attrs ,attrs)))
-      (catch2--debug "Parsed suite: %s with %d test cases" suite-name (length cases))
-      (catch2--debug "Suite attributes: rng-seed=%s, xml-format=%s, catch2-version=%s"
+      (catch2--debug "Parsed suite: %s with %d test cases" name (length cases))
+      (catch2--debug "Suite attributes: rng-seed=%s, xml-format-version=%s, catch2-version=%s"
                      rng-seed xml-format-version catch2-version)
       suite-plist)))
+
+;;
+;; Post-processing
+;;
+(defun catch2-generate-suite-summaries (suites)
+  "Generate summaries for each test suite in SUITES.
+Return list of plists with suite summary information."
+  (catch2--debug "Starting generate-suite-summaries with %d suites" (length suites))
+
+  (mapcar (lambda (suite)
+            (catch2--debug "Processing suite: %S" suite)
+            (let* ((suite-name (plist-get suite :name))
+                   (cases (plist-get suite :cases))
+                   (xml-file (plist-get suite :file))
+                   (rng-seed (plist-get suite :rng-seed))
+                   (catch2-version (plist-get suite :catch2-version))
+                   (xml-format-version (plist-get suite :xml-format-version))
+                   (overall-results (plist-get suite :overall-results))
+                   (overall-results-cases (plist-get suite :overall-results-cases)))
+
+              (catch2--debug "Suite name: %s, cases count: %d, file: %s"
+                             suite-name (length cases) xml-file)
+              (catch2--debug "RNG seed: %s, Catch2 version: %s, XML format: %s"
+                             rng-seed catch2-version xml-format-version)
+
+              (let ((total-durationInSeconds 0.0)
+                    (all-tags (make-hash-table :test 'equal))
+                    (has-failures nil)
+                    (fail-count 0))
+
+                ;; Process each test case using the parsed data
+                (dolist (case cases)
+                  (catch2--debug "Processing case: %S" case)
+                  (let ((success (plist-get case :success))
+                        (tags (plist-get case :tags))
+                        (durationInSeconds (plist-get case :durationInSeconds)))
+                    (catch2--debug "Case success: %s, durationInSeconds: %s, tags: %S"
+                                   success durationInSeconds tags)
+                    (setq total-durationInSeconds (+ total-durationInSeconds (or durationInSeconds 0.0)))
+                    (unless success
+                      (setq has-failures t)
+                      (cl-incf fail-count))
+                    ;; Collect unique tags
+                    (dolist (tag tags)
+                      (puthash tag t all-tags))))
+
+                (let* ((unique-tags (hash-table-keys all-tags))
+                      (summary `(:suite-name ,suite-name
+                                 :status ,(if has-failures 'fail 'pass)
+                                 :total-durationInSeconds ,total-durationInSeconds
+                                 :tags ,(mapconcat 'identity unique-tags ", ")
+                                 :rng-seed ,rng-seed
+                                 :catch2-version ,catch2-version
+                                 :xml-format-version ,xml-format-version
+                                 :test-count ,(length cases)
+                                 :fail-count ,fail-count
+                                 :overall-results ,overall-results
+                                 :overall-results-cases ,overall-results-cases)))
+
+                  (catch2--debug "Suite summary: %s - %s (%d tests, %d failed, %.3fs, tags: %s)"
+                                 suite-name
+                                 (if has-failures "FAIL" "PASS")
+                                 (length cases)
+                                 fail-count
+                                 total-durationInSeconds
+                                 (mapconcat 'identity unique-tags ", "))
+                  summary))))
+          suites))
+
+(defvar catch2-tabulated-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map tabulated-list-mode-map)
+    (define-key map (kbd "RET") 'catch2-tabulated-view-suite)
+    map))
+
+(define-derived-mode catch2-tabulated-mode tabulated-list-mode "Catch2 Suites"
+  "Major mode for viewing Catch2 test suites in a tabulated list."
+  (setq tabulated-list-format
+        [("Status" 8 t)
+         ("Suite Name" 40 t)
+         ("Tests" 8 t :right-align t)
+         ("Duration" 12 t :right-align t)
+         ("Fails" 8 t :right-align t)])
+  (setq tabulated-list-padding 2)
+  (setq tabulated-list-sort-key (cons "Suite Name" nil))
+  (tabulated-list-init-header))
+
+(defun catch2-tabulated-display ()
+  "Display Catch2 test suites in a tabulated list buffer."
+  (interactive)
+  (let* ((project (project-current))
+         (project-name (if project
+                           (project-name project)
+                         "No Project"))
+         (suites (catch2-parse-all-suites))
+         (summaries (catch2-generate-suite-summaries suites))
+         (buffer-name (format "%s: %s" catch2-project-name project-name)))
+
+    (catch2--debug "Displaying %d suites in buffer: %s" (length summaries) buffer-name)
+
+    (with-current-buffer (get-buffer-create buffer-name)
+      (catch2-tabulated-mode)
+
+      (setq tabulated-list-entries
+            (mapcar (lambda (summary)
+                      (list (plist-get summary :suite-name) ; key
+                            (vector
+                             (propertize
+                              (if (eq (plist-get summary :status) 'pass) "✓ PASS" "✗ FAIL")
+                              'face (if (eq (plist-get summary :status) 'pass)
+                                      '(:foreground "green" :weight bold)
+                                    '(:foreground "red" :weight bold)))
+                             (plist-get summary :suite-name)
+                             (number-to-string (plist-get summary :test-count))
+                             (format "%.3fs" (plist-get summary :total-durationInSeconds))
+                             (number-to-string (plist-get summary :fail-count)))))
+                    summaries))
+
+      (tabulated-list-print)
+      (display-buffer (current-buffer)))))
+
+(defun catch2-tabulated-view-suite ()
+  "View details of the test suite at point."
+  (interactive)
+  (let ((suite-name (tabulated-list-get-id)))
+    (message "Viewing suite: %s" suite-name)))
+
+;;
+;; Testing
+;;
 
 ;; Test function
 (defun catch2-test-summaries ()
   "Test function to generate suite summaries."
   (interactive)
-  (let ((suites (catch2-parse-all-suites))
+  (let* ((suites (catch2-parse-all-suites))
         (summaries (catch2-generate-suite-summaries suites)))
     (message "Generated %d suite summaries:" (length summaries))
     (dolist (summary summaries)
