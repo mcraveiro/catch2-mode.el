@@ -310,10 +310,27 @@ Return a plist with combined totals across all test suites."
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
     (define-key map (kbd "RET") 'catch2-tabulated-view-suite)
+    (define-key map (kbd "g") 'catch2-tabulated-reload)
+    map))
+
+(defvar catch2-testcases-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map tabulated-list-mode-map)
+    (define-key map (kbd "g") 'catch2-testcases-reload)
     map))
 
 (defvar catch2-tabulated-mode-hook nil
   "Hook run when entering `catch2-tabulated-mode'.")
+
+(defun catch2-tabulated-reload ()
+  "Reload the Catch2 suites table."
+  (interactive)
+  (catch2-tabulated-display))
+
+(defun catch2-testcases-reload ()
+  "Reload the current test cases view."
+  (interactive)
+  (catch2-tabulated-view-suite))
 
 (define-derived-mode catch2-tabulated-mode tabulated-list-mode "Catch2 Suites"
   "Major mode for viewing Catch2 test suites in a tabulated list."
