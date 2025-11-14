@@ -317,6 +317,7 @@ Return a plist with combined totals across all test suites."
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
     (define-key map (kbd "g") 'catch2-testcases-reload)
+    (define-key map (kbd "t") 'catch2-testcases-open-file)
     map))
 
 (defvar catch2-tabulated-mode-hook nil
@@ -426,8 +427,9 @@ Return a plist with combined totals across all test suites."
         [("Status" 8 t)
          ("Test Name" 50 t)
          ("Duration" 12 t :right-align t)
-         ("File" 30 t)
-         ("Line" 6 t :right-align t)])
+         ("File" 50 t)
+         ("Line" 6 t :right-align t)
+         ("Tags" 60 t)])
   (setq tabulated-list-padding 2)
   (setq tabulated-list-sort-key (cons "Test Name" nil))
   (tabulated-list-init-header)
@@ -463,11 +465,14 @@ CASES is a list of test case plists, SUITE-NAME is the name of the suite."
 
       (setq tabulated-list-entries
             (mapcar (lambda (case)
-                      (let ((name (plist-get case :name))
+                      (let* ((name (plist-get case :name))
                             (success (plist-get case :success))
                             (duration (plist-get case :durationInSeconds))
                             (filename (plist-get case :filename))
-                            (line (plist-get case :line)))
+                            (line (plist-get case :line))
+                            (tags (plist-get case :tags))
+                            (basename (when filename
+                                        (file-name-nondirectory filename))))
                         (list name ; key
                               (vector
                                (propertize
@@ -477,14 +482,31 @@ CASES is a list of test case plists, SUITE-NAME is the name of the suite."
                                       '(:foreground "red" :weight bold)))
                                name
                                (format "%.3fs" (or duration 0.0))
-                               (or filename "N/A")
+                               (propertize (or basename "N/A") 'full-filename filename)
                                (if (and line (> line 0))
                                    (number-to-string line)
-                                 "N/A")))))
+                                 "N/A")
+                               (mapconcat 'identity tags ", ")))))
                     cases))
 
       (tabulated-list-print)
       (switch-to-buffer (current-buffer)))))
+
+(defun catch2-testcases-open-file ()
+  "Open the test case file at the line number."
+  (interactive)
+  (let* ((entry (tabulated-list-get-entry))
+         (filename-cell (aref entry 3))  ; File column cell
+         (full-filename (get-text-property 0 'full-filename filename-cell))
+         (line-str (aref entry 4))  ; Line column
+         (line (when (stringp line-str)
+                 (string-to-number line-str))))
+    (if (and full-filename line (> line 0))
+        (progn
+          (find-file full-filename)
+          (goto-char (point-min))
+          (forward-line (1- line)))
+      (message "No file location available for this test case"))))
 
 ;;
 ;; Testing
