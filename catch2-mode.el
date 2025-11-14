@@ -205,14 +205,15 @@ Return list of plists with suite summary information."
             (let* ((suite-name (plist-get suite :name))
                    (cases (plist-get suite :cases))
                    (xml-file (plist-get suite :file))
+                   (modification-time (plist-get suite :modification-time))
                    (rng-seed (plist-get suite :rng-seed))
                    (catch2-version (plist-get suite :catch2-version))
                    (xml-format-version (plist-get suite :xml-format-version))
                    (overall-results (plist-get suite :overall-results))
                    (overall-results-cases (plist-get suite :overall-results-cases)))
 
-              (catch2--debug "Suite name: %s, cases count: %d, file: %s"
-                             suite-name (length cases) xml-file)
+              (catch2--debug "Suite name: %s, cases count: %d, file: %s, modification-time: %S"
+                             suite-name (length cases) xml-file modification-time)
               (catch2--debug "RNG seed: %s, Catch2 version: %s, XML format: %s"
                              rng-seed catch2-version xml-format-version)
 
@@ -242,6 +243,7 @@ Return list of plists with suite summary information."
                                  :status ,(if has-failures 'fail 'pass)
                                  :durationInSeconds ,total-durationInSeconds
                                  :tags ,(mapconcat 'identity unique-tags ", ")
+                                 :modification-time ,modification-time
                                  :rng-seed ,rng-seed
                                  :catch2-version ,catch2-version
                                  :xml-format-version ,xml-format-version
@@ -250,13 +252,14 @@ Return list of plists with suite summary information."
                                  :overall-results ,overall-results
                                  :overall-results-cases ,overall-results-cases)))
 
-                  (catch2--debug "Suite summary: %s - %s (%d tests, %d failed, %.3fs, tags: %s)"
+                  (catch2--debug "Suite summary: %s - %s (%d tests, %d failed, %.3fs, tags: %s, mod-time: %S)"
                                  suite-name
                                  (if has-failures "FAIL" "PASS")
                                  (length cases)
                                  fail-count
                                  total-durationInSeconds
-                                 (mapconcat 'identity unique-tags ", "))
+                                 (mapconcat 'identity unique-tags ", ")
+                                 modification-time)
                   summary))))
           suites))
 
@@ -300,17 +303,26 @@ Return a plist with combined totals across all test suites."
     (define-key map (kbd "RET") 'catch2-tabulated-view-suite)
     map))
 
+(defvar catch2-tabulated-mode-hook nil
+  "Hook run when entering `catch2-tabulated-mode'.")
+
 (define-derived-mode catch2-tabulated-mode tabulated-list-mode "Catch2 Suites"
   "Major mode for viewing Catch2 test suites in a tabulated list."
   (setq tabulated-list-format
         [("Status" 8 t)
-         ("Suite Name" 40 t)
+         ("Suite Name" 30 t)
          ("Tests" 8 t :right-align t)
          ("Duration" 12 t :right-align t)
-         ("Fails" 8 t :right-align t)])
+         ("Fails" 8 t :right-align t)
+         ("Modified" 16 t)
+         ("Tags" 30 t)])
   (setq tabulated-list-padding 2)
   (setq tabulated-list-sort-key (cons "Suite Name" nil))
-  (tabulated-list-init-header))
+  (tabulated-list-init-header)
+  (run-hooks 'catch2-tabulated-mode-hook))
+
+;; Add hl-line-mode to the hook
+(add-hook 'catch2-tabulated-mode-hook #'hl-line-mode)
 
 (defun catch2-tabulated-display ()
   "Display Catch2 test suites in a tabulated list buffer."
@@ -335,7 +347,9 @@ Return a plist with combined totals across all test suites."
         (setq tabulated-list-entries
               (append
                (mapcar (lambda (summary)
-                         (let ((fail-count (plist-get summary :fail-count)))
+                         (let ((fail-count (plist-get summary :fail-count))
+                               (mod-time (plist-get summary :modification-time))
+                               (tags (plist-get summary :tags)))
                            (list (plist-get summary :suite-name) ; key
                                  (vector
                                   (propertize
@@ -349,7 +363,11 @@ Return a plist with combined totals across all test suites."
                                   (propertize (number-to-string fail-count)
                                               'face (if (> fail-count 0)
                                                       '(:foreground "red" :weight bold)
-                                                    'default))))))
+                                                    'default))
+                                  (if mod-time
+                                      (format-time-string "%m-%d %H:%M" mod-time)
+                                    "N/A")
+                                  (or tags "")))))
                        summaries)
                (list (list "TOTALS" ; key for totals row
                            (let ((total-fail-count (plist-get totals-summary :fail-count)))
@@ -367,7 +385,9 @@ Return a plist with combined totals across all test suites."
                               (propertize (number-to-string total-fail-count)
                                          'face (if (> total-fail-count 0)
                                                  '(:foreground "red" :weight bold :height 1.1)
-                                               '(:weight bold :height 1.1)))))))))
+                                               '(:weight bold :height 1.1)))
+                              "" ; Empty for modification time in totals row
+                              "")))))) ; Empty for tags in totals row
 
         (tabulated-list-print)
         (switch-to-buffer (current-buffer))))))
