@@ -151,7 +151,9 @@ Return plist with all test case attributes and overall result data."
   "Parse a Catch2 v3 XML suite from XML-FILE.
 Return plist with all suite attributes and test cases."
   (catch2--debug "Parsing suite file: %s" xml-file)
-  (let* ((xml (with-temp-buffer
+  (let* ((file-attributes (file-attributes xml-file))
+         (modification-time (file-attribute-modification-time file-attributes))
+         (xml (with-temp-buffer
                 (insert-file-contents xml-file)
                 (xml-parse-region (point-min) (point-max))))
          (root (car xml)) ;; <Catch2TestRun ...>
@@ -178,6 +180,7 @@ Return plist with all suite attributes and test cases."
     (let ((suite-plist `(:name ,name
                         :cases ,(nreverse cases)
                         :file ,xml-file
+                        :modification-time ,modification-time
                         :rng-seed ,rng-seed
                         :xml-format-version ,xml-format-version
                         :catch2-version ,catch2-version
@@ -185,8 +188,8 @@ Return plist with all suite attributes and test cases."
                         :overall-results-cases ,overall-results-cases
                         :raw-attrs ,attrs)))
       (catch2--debug "Parsed suite: %s with %d test cases" name (length cases))
-      (catch2--debug "Suite attributes: rng-seed=%s, xml-format-version=%s, catch2-version=%s"
-                     rng-seed xml-format-version catch2-version)
+      (catch2--debug "Suite attributes: rng-seed=%s, xml-format-version=%s, catch2-version=%s, modification-time=%S"
+                     rng-seed xml-format-version catch2-version modification-time)
       suite-plist)))
 
 ;;
@@ -318,29 +321,53 @@ Return a plist with combined totals across all test suites."
                          "No Project"))
          (suites (catch2-parse-all-suites))
          (summaries (catch2-generate-suite-summaries suites))
+         (totals-summary (catch2-generate-totals-summary summaries))
          (buffer-name (format "*%s: %s*" catch2-project-name project-name)))
 
-    (catch2--debug "Displaying %d suites in buffer: %s" (length summaries) buffer-name)
+    (catch2--debug "Displaying %d suites + totals in buffer: %s" (length summaries) buffer-name)
 
     (if (null summaries)
         (message "No Catch2 test suites found")
       (with-current-buffer (get-buffer-create buffer-name)
         (catch2-tabulated-mode)
 
+        ;; Combine regular summaries with totals
         (setq tabulated-list-entries
-              (mapcar (lambda (summary)
-                        (list (plist-get summary :suite-name) ; key
-                              (vector
-                               (propertize
-                                (if (eq (plist-get summary :status) 'pass) "✓ PASS" "✗ FAIL")
-                                'face (if (eq (plist-get summary :status) 'pass)
-                                        '(:foreground "green" :weight bold)
-                                      '(:foreground "red" :weight bold)))
-                               (plist-get summary :suite-name)
-                               (number-to-string (plist-get summary :test-count))
-                               (format "%.3fs" (plist-get summary :durationInSeconds))
-                               (number-to-string (plist-get summary :fail-count)))))
-                      summaries))
+              (append
+               (mapcar (lambda (summary)
+                         (let ((fail-count (plist-get summary :fail-count)))
+                           (list (plist-get summary :suite-name) ; key
+                                 (vector
+                                  (propertize
+                                   (if (eq (plist-get summary :status) 'pass) "✓ PASS" "✗ FAIL")
+                                   'face (if (eq (plist-get summary :status) 'pass)
+                                           '(:foreground "green" :weight bold)
+                                         '(:foreground "red" :weight bold)))
+                                  (plist-get summary :suite-name)
+                                  (number-to-string (plist-get summary :test-count))
+                                  (format "%.3fs" (plist-get summary :durationInSeconds))
+                                  (propertize (number-to-string fail-count)
+                                              'face (if (> fail-count 0)
+                                                      '(:foreground "red" :weight bold)
+                                                    'default))))))
+                       summaries)
+               (list (list "TOTALS" ; key for totals row
+                           (let ((total-fail-count (plist-get totals-summary :fail-count)))
+                             (vector
+                              (propertize
+                               (if (eq (plist-get totals-summary :status) 'pass) "✓ PASS" "✗ FAIL")
+                               'face (if (eq (plist-get totals-summary :status) 'pass)
+                                       '(:foreground "green" :weight bold :height 1.1)
+                                     '(:foreground "red" :weight bold :height 1.1)))
+                              (propertize "TOTALS" 'face '(:weight bold :height 1.1))
+                              (propertize (number-to-string (plist-get totals-summary :test-count))
+                                         'face '(:weight bold :height 1.1))
+                              (propertize (format "%.3fs" (plist-get totals-summary :durationInSeconds))
+                                         'face '(:weight bold :height 1.1))
+                              (propertize (number-to-string total-fail-count)
+                                         'face (if (> total-fail-count 0)
+                                                 '(:foreground "red" :weight bold :height 1.1)
+                                               '(:weight bold :height 1.1)))))))))
 
         (tabulated-list-print)
         (switch-to-buffer (current-buffer))))))
