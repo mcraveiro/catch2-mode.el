@@ -271,30 +271,39 @@ Return a plist with combined totals across all test suites."
   (let ((total-durationInSeconds 0.0)
         (total-test-count 0)
         (total-fail-count 0)
-        (has-any-failures nil))
+        (has-any-failures nil)
+        (oldest-mod-time nil))
 
     (dolist (summary summaries)
       (let ((duration (plist-get summary :durationInSeconds))
             (test-count (plist-get summary :test-count))
             (fail-count (plist-get summary :fail-count))
-            (status (plist-get summary :status)))
+            (status (plist-get summary :status))
+            (mod-time (plist-get summary :modification-time)))
 
         (setq total-durationInSeconds (+ total-durationInSeconds (or duration 0.0)))
         (setq total-test-count (+ total-test-count (or test-count 0)))
         (setq total-fail-count (+ total-fail-count (or fail-count 0)))
         (when (eq status 'fail)
-          (setq has-any-failures t))))
+          (setq has-any-failures t))
+
+        ;; Find the oldest modification time
+        (when mod-time
+          (if (or (null oldest-mod-time)
+                  (time-less-p mod-time oldest-mod-time))
+              (setq oldest-mod-time mod-time)))))
 
     (let ((totals-summary `(:suite-name "TOTALS"
                             :status ,(if has-any-failures 'fail 'pass)
                             :durationInSeconds ,total-durationInSeconds
                             :test-count ,total-test-count
                             :fail-count ,total-fail-count
+                            :modification-time ,oldest-mod-time
                             :is-totals t)))
 
-      (catch2--debug "Generated totals: %d tests, %d failed, %.3fs, status: %s"
+      (catch2--debug "Generated totals: %d tests, %d failed, %.3fs, status: %s, oldest mod-time: %S"
                      total-test-count total-fail-count total-durationInSeconds
-                     (if has-any-failures "FAIL" "PASS"))
+                     (if has-any-failures "FAIL" "PASS") oldest-mod-time)
       totals-summary)))
 
 (defvar catch2-tabulated-mode-map
@@ -347,43 +356,59 @@ Return a plist with combined totals across all test suites."
               (append
                (mapcar (lambda (summary)
                          (let ((fail-count (plist-get summary :fail-count))
-                               (mod-time (plist-get summary :modification-time)))
-                           (list (plist-get summary :suite-name) ; key
+                               (mod-time (plist-get summary :modification-time))
+                               (status (plist-get summary :status))
+                               (suite-name (plist-get summary :suite-name)))
+                           (list suite-name ; key
                                  (vector
                                   (propertize
-                                   (if (eq (plist-get summary :status) 'pass) "✓ PASS" "✗ FAIL")
-                                   'face (if (eq (plist-get summary :status) 'pass)
-                                           '(:foreground "green" :weight bold)
-                                         '(:foreground "red" :weight bold)))
-                                  (plist-get summary :suite-name)
-                                  (number-to-string (plist-get summary :test-count))
-                                  (format "%.3fs" (plist-get summary :durationInSeconds))
+                                   (if (eq status 'pass) "✓ PASS" "✗ FAIL")
+                                   'face (if (eq status 'pass)
+                                           '(:weight bold)
+                                         '(:weight bold)))
+                                  (propertize suite-name 'face (if (eq status 'pass)
+                                                                 '(:weight bold)
+                                                               '(:weight bold)))
+                                  (propertize (number-to-string (plist-get summary :test-count))
+                                             'face (if (eq status 'pass)
+                                                     '(:weight bold)
+                                                   '(:weight bold)))
+                                  (propertize (format "%.3fs" (plist-get summary :durationInSeconds))
+                                             'face (if (eq status 'pass)
+                                                     '(:weight bold)
+                                                   '(:weight bold)))
                                   (propertize (number-to-string fail-count)
-                                              'face (if (> fail-count 0)
-                                                      '(:foreground "red" :weight bold)
-                                                    'default))
-                                  (if mod-time
-                                      (format-time-string "%Y-%m-%d %H:%M" mod-time)
-                                    "N/A")))))
+                                             'face (if (eq status 'pass)
+                                                     '(:weight bold)
+                                                   '(:weight bold)))
+                                  (propertize (if mod-time
+                                                  (format-time-string "%Y-%m-%d %H:%M" mod-time)
+                                                "N/A")
+                                             'face (if (eq status 'pass)
+                                                     '(:weight bold)
+                                                   '(:weight bold))))
+                                 :face (if (eq status 'pass)
+                                         '(:background "dark green" :foreground "white")
+                                       '(:background "dark red" :foreground "white")))))
                        summaries)
                (list (list "TOTALS" ; key for totals row
-                           (let ((total-fail-count (plist-get totals-summary :fail-count)))
+                           (let ((total-fail-count (plist-get totals-summary :fail-count))
+                                 (total-status (plist-get totals-summary :status)))
                              (vector
                               (propertize
-                               (if (eq (plist-get totals-summary :status) 'pass) "✓ PASS" "✗ FAIL")
-                               'face (if (eq (plist-get totals-summary :status) 'pass)
-                                       '(:foreground "green" :weight bold :height 1.1)
-                                     '(:foreground "red" :weight bold :height 1.1)))
+                               (if (eq total-status 'pass) "✓ PASS" "✗ FAIL")
+                               'face '(:weight bold :height 1.1))
                               (propertize "TOTALS" 'face '(:weight bold :height 1.1))
                               (propertize (number-to-string (plist-get totals-summary :test-count))
                                          'face '(:weight bold :height 1.1))
                               (propertize (format "%.3fs" (plist-get totals-summary :durationInSeconds))
                                          'face '(:weight bold :height 1.1))
                               (propertize (number-to-string total-fail-count)
-                                         'face (if (> total-fail-count 0)
-                                                 '(:foreground "red" :weight bold :height 1.1)
-                                               '(:weight bold :height 1.1)))
-                              "")))))) ; Empty for modification time in totals row
+                                         'face '(:weight bold :height 1.1))
+                              "")
+                             :face (if (eq total-status 'pass)
+                                     '(:background "dark green" :foreground "white" :height 1.1)
+                                   '(:background "dark red" :foreground "white" :height 1.1)))))))
 
         (tabulated-list-print)
         (switch-to-buffer (current-buffer))))))
