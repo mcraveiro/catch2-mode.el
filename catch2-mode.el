@@ -237,7 +237,7 @@ Return list of plists with suite summary information."
                 (let* ((unique-tags (hash-table-keys all-tags))
                       (summary `(:suite-name ,suite-name
                                  :status ,(if has-failures 'fail 'pass)
-                                 :total-durationInSeconds ,total-durationInSeconds
+                                 :durationInSeconds ,total-durationInSeconds
                                  :tags ,(mapconcat 'identity unique-tags ", ")
                                  :rng-seed ,rng-seed
                                  :catch2-version ,catch2-version
@@ -256,6 +256,40 @@ Return list of plists with suite summary information."
                                  (mapconcat 'identity unique-tags ", "))
                   summary))))
           suites))
+
+(defun catch2-generate-totals-summary (summaries)
+  "Generate an overall totals summary from SUMMARIES.
+Return a plist with combined totals across all test suites."
+  (catch2--debug "Generating totals summary from %d suite summaries" (length summaries))
+
+  (let ((total-durationInSeconds 0.0)
+        (total-test-count 0)
+        (total-fail-count 0)
+        (has-any-failures nil))
+
+    (dolist (summary summaries)
+      (let ((duration (plist-get summary :durationInSeconds))
+            (test-count (plist-get summary :test-count))
+            (fail-count (plist-get summary :fail-count))
+            (status (plist-get summary :status)))
+
+        (setq total-durationInSeconds (+ total-durationInSeconds (or duration 0.0)))
+        (setq total-test-count (+ total-test-count (or test-count 0)))
+        (setq total-fail-count (+ total-fail-count (or fail-count 0)))
+        (when (eq status 'fail)
+          (setq has-any-failures t))))
+
+    (let ((totals-summary `(:suite-name "TOTALS"
+                            :status ,(if has-any-failures 'fail 'pass)
+                            :durationInSeconds ,total-durationInSeconds
+                            :test-count ,total-test-count
+                            :fail-count ,total-fail-count
+                            :is-totals t)))
+
+      (catch2--debug "Generated totals: %d tests, %d failed, %.3fs, status: %s"
+                     total-test-count total-fail-count total-durationInSeconds
+                     (if has-any-failures "FAIL" "PASS"))
+      totals-summary)))
 
 (defvar catch2-tabulated-mode-map
   (let ((map (make-sparse-keymap)))
@@ -284,30 +318,32 @@ Return list of plists with suite summary information."
                          "No Project"))
          (suites (catch2-parse-all-suites))
          (summaries (catch2-generate-suite-summaries suites))
-         (buffer-name (format "%s: %s" catch2-project-name project-name)))
+         (buffer-name (format "*%s: %s*" catch2-project-name project-name)))
 
     (catch2--debug "Displaying %d suites in buffer: %s" (length summaries) buffer-name)
 
-    (with-current-buffer (get-buffer-create buffer-name)
-      (catch2-tabulated-mode)
+    (if (null summaries)
+        (message "No Catch2 test suites found")
+      (with-current-buffer (get-buffer-create buffer-name)
+        (catch2-tabulated-mode)
 
-      (setq tabulated-list-entries
-            (mapcar (lambda (summary)
-                      (list (plist-get summary :suite-name) ; key
-                            (vector
-                             (propertize
-                              (if (eq (plist-get summary :status) 'pass) "✓ PASS" "✗ FAIL")
-                              'face (if (eq (plist-get summary :status) 'pass)
-                                      '(:foreground "green" :weight bold)
-                                    '(:foreground "red" :weight bold)))
-                             (plist-get summary :suite-name)
-                             (number-to-string (plist-get summary :test-count))
-                             (format "%.3fs" (plist-get summary :total-durationInSeconds))
-                             (number-to-string (plist-get summary :fail-count)))))
-                    summaries))
+        (setq tabulated-list-entries
+              (mapcar (lambda (summary)
+                        (list (plist-get summary :suite-name) ; key
+                              (vector
+                               (propertize
+                                (if (eq (plist-get summary :status) 'pass) "✓ PASS" "✗ FAIL")
+                                'face (if (eq (plist-get summary :status) 'pass)
+                                        '(:foreground "green" :weight bold)
+                                      '(:foreground "red" :weight bold)))
+                               (plist-get summary :suite-name)
+                               (number-to-string (plist-get summary :test-count))
+                               (format "%.3fs" (plist-get summary :durationInSeconds))
+                               (number-to-string (plist-get summary :fail-count)))))
+                      summaries))
 
-      (tabulated-list-print)
-      (display-buffer (current-buffer)))))
+        (tabulated-list-print)
+        (switch-to-buffer (current-buffer))))))
 
 (defun catch2-tabulated-view-suite ()
   "View details of the test suite at point."
