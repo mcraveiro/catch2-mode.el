@@ -364,30 +364,18 @@ Return a plist with combined totals across all test suites."
                                   (propertize
                                    (if (eq status 'pass) "✓ PASS" "✗ FAIL")
                                    'face (if (eq status 'pass)
-                                           '(:foreground "light green" :weight bold)
-                                         '(:foreground "indian red" :weight bold)))
-                                  (propertize suite-name
-                                             'face (if (eq status 'pass)
-                                                     '(:foreground "light green" :weight bold)
-                                                   '(:foreground "indian red" :weight bold)))
-                                  (propertize (number-to-string (plist-get summary :test-count))
-                                             'face (if (eq status 'pass)
-                                                     '(:foreground "light green" :weight bold)
-                                                   '(:foreground "indian red" :weight bold)))
-                                  (propertize (format "%.3fs" (plist-get summary :durationInSeconds))
-                                             'face (if (eq status 'pass)
-                                                     '(:foreground "light green" :weight bold)
-                                                   '(:foreground "indian red" :weight bold)))
+                                           '(:foreground "green" :weight bold)
+                                         '(:foreground "red" :weight bold)))
+                                  suite-name
+                                  (number-to-string (plist-get summary :test-count))
+                                  (format "%.3fs" (plist-get summary :durationInSeconds))
                                   (propertize (number-to-string fail-count)
-                                             'face (if (eq status 'pass)
-                                                     '(:foreground "light green" :weight bold)
-                                                   '(:foreground "indian red" :weight bold)))
-                                  (propertize (if mod-time
-                                                  (format-time-string "%Y-%m-%d %H:%M" mod-time)
-                                                "N/A")
-                                             'face (if (eq status 'pass)
-                                                     '(:foreground "light green" :weight bold)
-                                                   '(:foreground "indian red" :weight bold)))))))
+                                              'face (if (> fail-count 0)
+                                                      '(:foreground "red" :weight bold)
+                                                    'default))
+                                  (if mod-time
+                                      (format-time-string "%Y-%m-%d %H:%M" mod-time)
+                                    "N/A")))))
                        summaries)
                (list (list "TOTALS" ; key for totals row
                            (let ((total-fail-count (plist-get totals-summary :fail-count))
@@ -397,30 +385,20 @@ Return a plist with combined totals across all test suites."
                               (propertize
                                (if (eq total-status 'pass) "✓ PASS" "✗ FAIL")
                                'face (if (eq total-status 'pass)
-                                       '(:foreground "light green" :weight bold :height 1.1)
-                                     '(:foreground "indian red" :weight bold :height 1.1)))
-                              (propertize "TOTALS"
-                                         'face (if (eq total-status 'pass)
-                                                 '(:foreground "light green" :weight bold :height 1.1)
-                                               '(:foreground "indian red" :weight bold :height 1.1)))
+                                       '(:foreground "green" :weight bold :height 1.1)
+                                     '(:foreground "red" :weight bold :height 1.1)))
+                              (propertize "TOTALS" 'face '(:weight bold :height 1.1))
                               (propertize (number-to-string (plist-get totals-summary :test-count))
-                                         'face (if (eq total-status 'pass)
-                                                 '(:foreground "light green" :weight bold :height 1.1)
-                                               '(:foreground "indian red" :weight bold :height 1.1)))
+                                         'face '(:weight bold :height 1.1))
                               (propertize (format "%.3fs" (plist-get totals-summary :durationInSeconds))
-                                         'face (if (eq total-status 'pass)
-                                                 '(:foreground "light green" :weight bold :height 1.1)
-                                               '(:foreground "indian red" :weight bold :height 1.1)))
+                                         'face '(:weight bold :height 1.1))
                               (propertize (number-to-string total-fail-count)
-                                         'face (if (eq total-status 'pass)
-                                                 '(:foreground "light green" :weight bold :height 1.1)
-                                               '(:foreground "indian red" :weight bold :height 1.1)))
-                              (propertize (if oldest-mod-time
-                                              (format-time-string "%Y-%m-%d %H:%M" oldest-mod-time)
-                                            "N/A")
-                                         'face (if (eq total-status 'pass)
-                                                 '(:foreground "light green" :weight bold :height 1.1)
-                                               '(:foreground "indian red" :weight bold :height 1.1)))))))))
+                                         'face (if (> total-fail-count 0)
+                                                 '(:foreground "red" :weight bold :height 1.1)
+                                               '(:weight bold :height 1.1)))
+                              (if oldest-mod-time
+                                  (format-time-string "%Y-%m-%d %H:%M" oldest-mod-time)
+                                "N/A")))))))
 
         (tabulated-list-print)
         (switch-to-buffer (current-buffer))))))
@@ -478,26 +456,14 @@ CASES is a list of test case plists, SUITE-NAME is the name of the suite."
                                (propertize
                                 (if success "✓ PASS" "✗ FAIL")
                                 'face (if success
-                                        '(:foreground "light green" :weight bold)
-                                      '(:foreground "indian red" :weight bold)))
-                               (propertize name
-                                          'face (if success
-                                                  '(:foreground "light green" :weight bold)
-                                                '(:foreground "indian red" :weight bold)))
-                               (propertize (format "%.3fs" (or duration 0.0))
-                                          'face (if success
-                                                  '(:foreground "light green" :weight bold)
-                                                '(:foreground "indian red" :weight bold)))
-                               (propertize (or filename "N/A")
-                                          'face (if success
-                                                  '(:foreground "light green" :weight bold)
-                                                '(:foreground "indian red" :weight bold)))
-                               (propertize (if (and line (> line 0))
-                                               (number-to-string line)
-                                             "N/A")
-                                          'face (if success
-                                                  '(:foreground "light green" :weight bold)
-                                                  '(:foreground "indian red" :weight bold)))))))
+                                        '(:foreground "green" :weight bold)
+                                      '(:foreground "red" :weight bold)))
+                               name
+                               (format "%.3fs" (or duration 0.0))
+                               (or filename "N/A")
+                               (if (and line (> line 0))
+                                   (number-to-string line)
+                                 "N/A")))))
                     cases))
 
       (tabulated-list-print)
