@@ -1,9 +1,63 @@
 * Catch2 Mode
 
-Very simple emacs mode to display Catch2 unit tests. Displays the overview at
-the test suite level and allows you to drill down into individual test cases.
-You can navigate to the source code location for the test with =f= and, if
-you follow our approach for naming logs, you can also open the log file
-associated with the test.
+A lightweight Emacs major mode for browsing and interacting with *Catch2 v3*
+test results via XML output.
 
-[[./main-screen.png]]
+** Features
+
+- *Suite Overview*: Displays all test suites in a clean, sortable table with
+  pass/fail status, test count, failure count, total duration, and last modified
+  time.
+- *Drill-Down Navigation*: Press `RET` on any suite (or `TOTALS`) to view
+  individual test cases.
+- *Test Case Details*: Shows test name, status, duration, source file, line
+  number, and tags.
+- *Source Code Integration*:
+  - =t= – Jump to the test definition in the source file (at the correct line).
+  - *Log File Support*:
+    - =l= – Open the corresponding per-test log file (if available under
+      =../log/<suite>/<test>*.log= relative to XML).
+  - *Live Reload*: Press =g= in any view to refresh results from the latest XML
+    files.
+  - *Project-Aware*: Automatically detects the current project root and searches
+    recursively for =test-results-*.tests.xml=.
+
+**  Key Bindings (Suite View)
+
+| Key   | Action                   |
+|-------+--------------------------|
+| =RET= | View test cases in suite |
+| =g=   | Reload all suites        |
+
+**  Key Bindings (Test Case View)
+
+| Key | Action                   |
+|-----+--------------------------|
+| =t= | Open test in source file |
+| =l= | Open test log file       |
+| =g= | Reload current suite     |
+
+** Screenshot
+
+  [[./main-screen.png]]
+
+** Catch2 Specifics
+
+The code is designed specifically to parse Catch2 v3 XML:
+
+#+begin_src xml
+<?xml version="1.0" encoding="UTF-8"?>
+<Catch2TestRun name="test_suite_name" rng-seed="1748879409" xml-format-version="3" catch2-version="3.11.0">
+  <TestCase name="test_case_name" tags="[tag1][#some_test]" filename="/some/path/PROJECT/some/path/some_test.cpp" line="153">
+    <OverallResult success="true" skips="0" durationInSeconds="0.000813"/>
+  </TestCase>
+  <OverallResults successes="238" failures="0" expectedFailures="0" skips="0"/>
+  <OverallResultsCases successes="37" failures="0" expectedFailures="0" skips="0"/>
+</Catch2TestRun>
+#+end_src
+
+We use the following arguments in Catch2:
+
+#+begin_src sh
+--reporter xml --durations yes --filenames-as-tags
+#+end_src
