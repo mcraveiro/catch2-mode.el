@@ -8,19 +8,19 @@ test results via XML output.
 - *Suite Overview*: Displays all test suites in a clean, sortable table with
   pass/fail status, test count, failure count, total duration, and last modified
   time.
-- *Drill-Down Navigation*: Press `RET` on any suite (or `TOTALS`) to view
+- *Drill-Down Navigation*: Press =RET= on any suite (or =TOTALS=) to view
   individual test cases.
 - *Test Case Details*: Shows test name, status, duration, source file, line
   number, and tags.
 - *Source Code Integration*:
   - =t= – Jump to the test definition in the source file (at the correct line).
-  - *Log File Support*:
-    - =l= – Open the corresponding per-test log file (if available under
-      =../log/<suite>/<test>*.log= relative to XML).
-  - *Live Reload*: Press =g= in any view to refresh results from the latest XML
-    files.
-  - *Project-Aware*: Automatically detects the current project root and searches
-    recursively for =test-results-*.tests.xml=.
+- *Log File Support*:
+  - =l= – Open the corresponding per-test log file (if available under
+    =../log/<suite>/<test>*.log= relative to XML).
+- *Live Reload*: Press =g= in any view to refresh results from the latest XML
+  files.
+- *Project-Aware*: Automatically detects the current project root and searches
+   recursively for =test-results-*.tests.xml=.
 
 **  Key Bindings (Suite View)
 
