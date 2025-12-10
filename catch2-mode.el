@@ -372,6 +372,15 @@ Return a plist with combined totals across all test suites."
   (interactive)
   (catch2-tabulated-display))
 
+(defun catch2-tabulated-open-xml ()
+  "Open the XML file for the test suite at point."
+  (interactive)
+  (let* ((key (tabulated-list-get-id))
+         (xml-file (when key (gethash key catch2--suite-files))))
+    (if (and xml-file (not (string= key "TOTALS")))
+        (find-file xml-file)
+      (message "No XML file for this entry"))))
+
 (defun catch2-testcases-reload ()
   "Reload the current test cases view."
   (interactive)
@@ -425,6 +434,7 @@ Return a plist with combined totals across all test suites."
   "Menu for Catch2 test suites."
   ["Actions"
    ("RET" "View suite tests" catch2-tabulated-view-suite)
+   ("x" "Open XML file" catch2-tabulated-open-xml)
    ("g" "Reload" catch2-tabulated-reload)
    ("q" "Quit" quit-window)])
 
@@ -444,6 +454,7 @@ Return a plist with combined totals across all test suites."
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
     (define-key map (kbd "RET") #'catch2-tabulated-view-suite)
+    (define-key map (kbd "x") #'catch2-tabulated-open-xml)
     (define-key map (kbd "g") #'catch2-tabulated-reload)
     (define-key map (kbd "m") #'catch2-suites-menu)
     (define-key map (kbd "?") #'catch2-suites-menu)
