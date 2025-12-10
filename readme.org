@@ -6,36 +6,68 @@ test results via XML output.
 ** Features
 
 - *Suite Overview*: Displays all test suites in a clean, sortable table with
-  pass/fail status, test count, failure count, total duration, and last modified
-  time.
-- *Drill-Down Navigation*: Press =RET= on any suite (or =TOTALS=) to view
-  individual test cases.
+  pass/fail status, preset (build configuration), test count, failure count,
+  total duration, and last modified time.
+- *Build Configuration Support*: Automatically detects build presets (e.g.,
+  =linux-clang-debug=, =linux-gcc-release=) from file paths and displays them
+  in a separate column.
+- *Drill-Down Navigation*: Press =RET= on any suite to view individual test
+  cases.
 - *Test Case Details*: Shows test name, status, duration, source file, line
-  number, and tags.
+  number, and tags. Failures are sorted to appear first.
+- *Run Tests*: Press =r= to re-run tests for a suite directly from the UI.
 - *Source Code Integration*:
-  - =t= – Jump to the test definition in the source file (at the correct line).
+  - =t= / =RET= – Jump to the test definition in the source file (at the correct line).
 - *Log File Support*:
   - =l= – Open the corresponding per-test log file (if available under
     =../log/<suite>/<test>*.log= relative to XML).
+- *XML File Management*:
+  - =x= – Open the raw XML file for a test suite.
+  - =k= – Delete the XML file (with confirmation) and reload.
 - *Live Reload*: Press =g= in any view to refresh results from the latest XML
   files.
+- *Transient Menus*: Press =m= or =?= to see available actions in either view.
+- *Directory Selection*: Running =M-x catch2= prompts for a directory to search.
+- *Visual Indicators*:
+  - Status column shows green =✓ PASS= or red =✗ FAIL=
+  - Suite name and modified time are colored green (pass) or red (fail)
+  - Stale suites (>5 minutes older than newest) show yellow highlighting on
+    name and modified columns
+  - Current XML file path displayed in message area as you navigate
 - *Project-Aware*: Automatically detects the current project root and searches
-   recursively for =test-results-*.tests.xml=.
+  recursively for =test-results-*.tests.xml=.
 
-**  Key Bindings (Suite View)
+** Key Bindings (Suite View)
 
 | Key   | Action                   |
 |-------+--------------------------|
 | =RET= | View test cases in suite |
+| =r=   | Run tests for suite      |
+| =x=   | Open XML file            |
+| =k=   | Delete XML file          |
 | =g=   | Reload all suites        |
+| =m=   | Show transient menu      |
+| =?=   | Show transient menu      |
 
-**  Key Bindings (Test Case View)
+** Key Bindings (Test Case View)
 
-| Key | Action                   |
-|-----+--------------------------|
-| =t= | Open test in source file |
-| =l= | Open test log file       |
-| =g= | Reload current suite     |
+| Key   | Action                   |
+|-------+--------------------------|
+| =RET= | Open test in source file |
+| =t=   | Open test in source file |
+| =l=   | Open test log file       |
+| =g=   | Reload current suite     |
+| =m=   | Show transient menu      |
+| =?=   | Show transient menu      |
+
+** Customization
+
+- =catch2-xml-file-pattern= – Pattern to match XML files (default:
+  =test-results-*.tests.xml=)
+- =catch2-project-name= – Buffer name prefix (default: =Catch2 Test Suites=)
+- =catch2-test-arguments= – Arguments passed to test executable when running
+  tests (default: =--reporter xml --durations yes --filenames-as-tags=). The
+  =-o= output file argument is added automatically.
 
 ** Screenshot
 
@@ -59,5 +91,18 @@ The code is designed specifically to parse Catch2 v3 XML:
 We use the following arguments in Catch2:
 
 #+begin_src sh
---reporter xml --durations yes --filenames-as-tags
+--reporter xml --durations yes --filenames-as-tags -o <output-file.xml>
 #+end_src
+
+** Dependencies
+
+- =transient= (for menus)
+
+** Running Tests from the UI
+
+The test executable is derived from the XML filename by removing the
+=test-results-= prefix and =.xml= extension. For example:
+
+- =test-results-ores.accounts.tests.xml= → =ores.accounts.tests=
+
+The executable must be in the same directory as the XML file.
