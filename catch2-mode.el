@@ -27,6 +27,7 @@
 (require 'xml)
 (require 'subr-x)
 (require 'project)
+(require 'transient)
 
 (defgroup catch2-mode nil
   "Display Catch2 tests in a tabulated list."
@@ -363,24 +364,6 @@ Return a plist with combined totals across all test suites."
                      (if has-any-failures "FAIL" "PASS") oldest-mod-time)
       totals-summary)))
 
-(defvar catch2-tabulated-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map tabulated-list-mode-map)
-    (define-key map (kbd "RET") #'catch2-tabulated-view-suite)
-    (define-key map (kbd "g") #'catch2-tabulated-reload)
-    map)
-  "Keymap for `catch2-tabulated-mode'.")
-
-(defvar catch2-testcases-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map tabulated-list-mode-map)
-    (define-key map (kbd "g") #'catch2-testcases-reload)
-    (define-key map (kbd "t") #'catch2-testcases-open-file)
-    (define-key map (kbd "l") #'catch2-testcases-open-log)
-    (define-key map (kbd "RET") #'catch2-testcases-open-file) ; Add RET to open file too
-    map)
-  "Keymap for `catch2-testcases-mode'.")
-
 (defvar catch2-tabulated-mode-hook nil
   "Hook run when entering `catch2-tabulated-mode'.")
 
@@ -435,6 +418,53 @@ Return a plist with combined totals across all test suites."
       (when xml-file
         (message "%s" xml-file)))))
 
+;;
+;; Transient menus
+;;
+(transient-define-prefix catch2-suites-menu ()
+  "Menu for Catch2 test suites."
+  ["Actions"
+   ("RET" "View suite tests" catch2-tabulated-view-suite)
+   ("g" "Reload" catch2-tabulated-reload)
+   ("q" "Quit" quit-window)])
+
+(transient-define-prefix catch2-testcases-menu ()
+  "Menu for Catch2 test cases."
+  ["Actions"
+   ("RET" "Open test file" catch2-testcases-open-file)
+   ("t" "Open test file" catch2-testcases-open-file)
+   ("l" "Open log file" catch2-testcases-open-log)
+   ("g" "Reload" catch2-testcases-reload)
+   ("q" "Quit" quit-window)])
+
+;;
+;; Keymaps
+;;
+(defvar catch2-tabulated-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map tabulated-list-mode-map)
+    (define-key map (kbd "RET") #'catch2-tabulated-view-suite)
+    (define-key map (kbd "g") #'catch2-tabulated-reload)
+    (define-key map (kbd "m") #'catch2-suites-menu)
+    (define-key map (kbd "?") #'catch2-suites-menu)
+    map)
+  "Keymap for `catch2-tabulated-mode'.")
+
+(defvar catch2-testcases-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map tabulated-list-mode-map)
+    (define-key map (kbd "g") #'catch2-testcases-reload)
+    (define-key map (kbd "t") #'catch2-testcases-open-file)
+    (define-key map (kbd "l") #'catch2-testcases-open-log)
+    (define-key map (kbd "RET") #'catch2-testcases-open-file)
+    (define-key map (kbd "m") #'catch2-testcases-menu)
+    (define-key map (kbd "?") #'catch2-testcases-menu)
+    map)
+  "Keymap for `catch2-testcases-mode'.")
+
+;;
+;; Modes
+;;
 (define-derived-mode catch2-tabulated-mode tabulated-list-mode "Catch2 Suites"
   "Major mode for viewing Catch2 test suites in a tabulated list."
   (setq tabulated-list-format
