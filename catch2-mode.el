@@ -548,17 +548,28 @@ DIRECTORY is the directory to search for XML files."
         (tabulated-list-print)
         (switch-to-buffer (current-buffer))))))
 
+(defun catch2--status-lessp (entry1 entry2)
+  "Compare ENTRY1 and ENTRY2 by status, with failures first."
+  (let ((status1 (aref (cadr entry1) 0))
+        (status2 (aref (cadr entry2) 0)))
+    (let ((fail1 (string-match-p "FAIL" status1))
+          (fail2 (string-match-p "FAIL" status2)))
+      (cond
+       ((and fail1 (not fail2)) t)   ; entry1 is fail, entry2 is pass -> entry1 first
+       ((and fail2 (not fail1)) nil) ; entry1 is pass, entry2 is fail -> entry2 first
+       (t nil)))))                    ; same status, keep order
+
 (define-derived-mode catch2-testcases-mode tabulated-list-mode "Catch2 Test Cases"
   "Major mode for viewing Catch2 test cases in a tabulated list."
   (setq tabulated-list-format
-        [("Status" 8 t)
+        [("Status" 8 catch2--status-lessp)
          ("Test Name" 50 t)
          ("Duration" 12 t :right-align t)
          ("File" 50 t)
          ("Line" 6 t :right-align t)
          ("Tags" 60 t)])
   (setq tabulated-list-padding 2)
-  (setq tabulated-list-sort-key (cons "Test Name" nil))
+  (setq tabulated-list-sort-key '("Status" . nil))
   (tabulated-list-init-header)
   (run-hooks 'catch2-tabulated-mode-hook))
 
