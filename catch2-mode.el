@@ -46,6 +46,12 @@
   :type 'string
   :group 'catch2-mode)
 
+(defvar-local catch2--search-directory nil
+  "The directory used to search for Catch2 XML files in this buffer.")
+
+(defvar-local catch2--suite-files nil
+  "Hash table mapping suite names to their XML file paths.")
+
 ;;
 ;; Debugging
 ;;
@@ -283,6 +289,7 @@ Return list of plists with suite summary information."
                                  :durationInSeconds ,total-durationInSeconds
                                  :tags ,(mapconcat 'identity unique-tags ", ")
                                  :modification-time ,modification-time
+                                 :xml-file ,xml-file
                                  :rng-seed ,rng-seed
                                  :catch2-version ,catch2-version
                                  :xml-format-version ,xml-format-version
@@ -407,6 +414,16 @@ Return a plist with combined totals across all test suites."
             (message "No log file found for test case: %s" test-name)))
       (message "Test case not found: %s" test-name))))
 
+(defun catch2--show-current-file ()
+  "Show the XML file path for the suite at point in the message area."
+  (when (and (eq major-mode 'catch2-tabulated-mode)
+             catch2--suite-files)
+    (let* ((suite-name (tabulated-list-get-id))
+           (xml-file (when suite-name
+                       (gethash suite-name catch2--suite-files))))
+      (when xml-file
+        (message "%s" xml-file)))))
+
 (define-derived-mode catch2-tabulated-mode tabulated-list-mode "Catch2 Suites"
   "Major mode for viewing Catch2 test suites in a tabulated list."
   (setq tabulated-list-format
@@ -419,29 +436,45 @@ Return a plist with combined totals across all test suites."
   (setq tabulated-list-padding 2)
   (setq tabulated-list-sort-key (cons "Suite Name" nil))
   (tabulated-list-init-header)
+  (add-hook 'post-command-hook #'catch2--show-current-file nil t)
   (run-hooks 'catch2-tabulated-mode-hook))
 
 ;; Add hl-line-mode to the hook
 (add-hook 'catch2-tabulated-mode-hook #'hl-line-mode)
 
-(defun catch2-tabulated-display ()
-  "Display Catch2 test suites in a tabulated list buffer."
+(defun catch2-tabulated-display (&optional directory)
+  "Display Catch2 test suites in a tabulated list buffer.
+DIRECTORY is the directory to search for XML files."
   (interactive)
-  (let* ((project (project-current))
-         (project-name (if project
-                           (project-name project)
-                         "No Project"))
-         (suites (catch2-parse-all-suites))
+  (let* ((search-dir (or directory
+                         catch2--search-directory
+                         (when-let ((proj (project-current)))
+                           (project-root proj))
+                         default-directory))
+         (suites (catch2-parse-all-suites search-dir))
          (summaries (catch2-generate-suite-summaries suites))
          (totals-summary (catch2-generate-totals-summary summaries))
-         (buffer-name (format "*%s %s*" catch2-project-name project-name)))
+         (short-dir (abbreviate-file-name search-dir))
+         (buffer-name (format "*%s*" catch2-project-name)))
 
-    (catch2--debug "Displaying %d suites + totals in buffer: %s" (length summaries) buffer-name)
+    (catch2--debug "Displaying %d suites + totals in buffer: %s (dir: %s)"
+                   (length summaries) buffer-name short-dir)
 
     (if (null summaries)
-        (message "No Catch2 test suites found")
+        (message "No Catch2 test suites found in %s" short-dir)
       (with-current-buffer (get-buffer-create buffer-name)
         (catch2-tabulated-mode)
+        ;; Store the search directory for reload
+        (setq catch2--search-directory search-dir)
+
+        ;; Build suite name to XML file mapping
+        (setq catch2--suite-files (make-hash-table :test 'equal))
+        (dolist (summary summaries)
+          (puthash (plist-get summary :suite-name)
+                   (plist-get summary :xml-file)
+                   catch2--suite-files))
+        ;; Add entry for TOTALS showing the search directory
+        (puthash "TOTALS" short-dir catch2--suite-files)
 
         ;; Combine regular summaries with totals
         (setq tabulated-list-entries
@@ -479,7 +512,8 @@ Return a plist with combined totals across all test suites."
                                'face (if (eq total-status 'pass)
                                        '(:foreground "green" :weight bold :height 1.1)
                                      '(:foreground "red" :weight bold :height 1.1)))
-                              (propertize "TOTALS" 'face '(:weight bold :height 1.1))
+                              (propertize "TOTALS"
+                                          'face '(:weight bold :height 1.1))
                               (propertize (number-to-string (plist-get totals-summary :test-count))
                                          'face '(:weight bold :height 1.1))
                               (propertize (format "%.3fs" (plist-get totals-summary :durationInSeconds))
@@ -628,10 +662,15 @@ Return list of suite plists."
          (message "Error parsing %s: %s" file (error-message-string err)))))
     (nreverse suites)))
 
-(defun catch2 ()
-  "Open the Catch2 test suites overview."
-  (interactive)
-  (catch2-tabulated-display))
+(defun catch2 (directory)
+  "Open the Catch2 test suites overview.
+Prompts for DIRECTORY to search for Catch2 XML test result files."
+  (interactive
+   (list (read-directory-name "Search for Catch2 tests in: "
+                              (or (when-let ((proj (project-current)))
+                                    (project-root proj))
+                                  default-directory))))
+  (catch2-tabulated-display directory))
 
 (provide 'catch2-mode)
 ;;; catch2-mode.el ends here
