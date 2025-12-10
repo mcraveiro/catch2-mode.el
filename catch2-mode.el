@@ -47,6 +47,12 @@
   :type 'string
   :group 'catch2-mode)
 
+(defcustom catch2-test-arguments '("--reporter" "xml" "--durations" "yes" "--filenames-as-tags")
+  "Arguments to pass to Catch2 test executable.
+The output file argument (-o) is added automatically."
+  :type '(repeat string)
+  :group 'catch2-mode)
+
 (defvar-local catch2--search-directory nil
   "The directory used to search for Catch2 XML files in this buffer.")
 
@@ -393,6 +399,71 @@ Return a plist with combined totals across all test suites."
           (catch2-tabulated-reload))
       (message "No XML file for this entry"))))
 
+(defun catch2--xml-to-executable (xml-file)
+  "Convert XML-FILE path to the test executable path.
+Removes 'test-results-' prefix and '.xml' extension."
+  (let* ((dir (file-name-directory xml-file))
+         (name (file-name-nondirectory xml-file))
+         (exe-name (string-remove-suffix ".xml"
+                     (string-remove-prefix "test-results-" name))))
+    (expand-file-name exe-name dir)))
+
+(defun catch2-tabulated-run-tests ()
+  "Run the tests for the test suite at point."
+  (interactive)
+  (let* ((key (tabulated-list-get-id))
+         (xml-file (when key (expand-file-name (gethash key catch2--suite-files)))))
+    (if (and xml-file (not (string= key "TOTALS")))
+        (let* ((executable (catch2--xml-to-executable xml-file))
+               (args (append catch2-test-arguments (list "-o" xml-file)))
+               (default-directory (file-name-directory executable))
+               (buffer-name (format "*catch2-run: %s*" (file-name-nondirectory executable)))
+               (cmd-line (format "%s %s" executable (string-join args " "))))
+          (catch2--debug "Run tests: executable=%s" executable)
+          (catch2--debug "Run tests: args=%S" args)
+          (catch2--debug "Run tests: default-directory=%s" default-directory)
+          (catch2--debug "Run tests: full command: %s" cmd-line)
+          (if (file-executable-p executable)
+              (progn
+                (message "Running %s..." (file-name-nondirectory executable))
+                (with-current-buffer (get-buffer-create buffer-name)
+                  (erase-buffer)
+                  (insert (format "Command: %s\n" cmd-line))
+                  (insert (format "Directory: %s\n" default-directory))
+                  (insert (format "Started: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
+                  (insert "--- Output ---\n\n"))
+                (let ((proc (apply #'start-process
+                                   (file-name-nondirectory executable)
+                                   buffer-name
+                                   executable
+                                   args)))
+                  (set-process-sentinel
+                   proc
+                   (lambda (proc event)
+                     (catch2--debug "Run tests: process event: %s" (string-trim event))
+                     (with-current-buffer (process-buffer proc)
+                       (goto-char (point-max))
+                       (insert (format "\n--- Process %s ---\n" (string-trim event)))
+                       (insert (format "Exit code: %s\n" (process-exit-status proc))))
+                     (catch2--debug "Run tests: exit code=%s" (process-exit-status proc))
+                     (when (string-match-p "finished\\|exited" event)
+                       (message "Test run completed: %s (exit code %d)"
+                                (string-trim event)
+                                (process-exit-status proc))
+                       (catch2-tabulated-reload))))
+                  (set-process-filter
+                   proc
+                   (lambda (proc output)
+                     (catch2--debug "Run tests: output chunk: %s" (substring output 0 (min 200 (length output))))
+                     (when (buffer-live-p (process-buffer proc))
+                       (with-current-buffer (process-buffer proc)
+                         (goto-char (point-max))
+                         (insert output)))))))
+            (progn
+              (catch2--debug "Run tests: executable not found: %s" executable)
+              (message "Executable not found: %s" executable))))
+      (message "No test suite at point"))))
+
 (defun catch2-testcases-reload ()
   "Reload the current test cases view."
   (interactive)
@@ -446,6 +517,7 @@ Return a plist with combined totals across all test suites."
   "Menu for Catch2 test suites."
   ["Actions"
    ("RET" "View suite tests" catch2-tabulated-view-suite)
+   ("r" "Run tests" catch2-tabulated-run-tests)
    ("x" "Open XML file" catch2-tabulated-open-xml)
    ("k" "Delete XML file" catch2-tabulated-delete-xml)
    ("g" "Reload" catch2-tabulated-reload)
@@ -467,6 +539,7 @@ Return a plist with combined totals across all test suites."
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
     (define-key map (kbd "RET") #'catch2-tabulated-view-suite)
+    (define-key map (kbd "r") #'catch2-tabulated-run-tests)
     (define-key map (kbd "x") #'catch2-tabulated-open-xml)
     (define-key map (kbd "k") #'catch2-tabulated-delete-xml)
     (define-key map (kbd "g") #'catch2-tabulated-reload)
