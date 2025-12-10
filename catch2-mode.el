@@ -118,20 +118,27 @@ Return plist with all test case attributes and overall result data."
          (filename (cdr (assq 'filename attrs)))
          (line (string-to-number (or (cdr (assq 'line attrs)) "0")))
          (children (xml-node-children case-node))
-         success
-         durationInSeconds
-         skips)
+         (success nil)  ; Default to nil (fail) until we find OverallResult
+         (durationInSeconds 0.0)
+         (skips 0)
+         (found-overall-result nil))
 
     ;; Find <OverallResult> element
     (dolist (child children)
       (when (and (consp child)
                  (eq (car child) 'OverallResult))
-        (let ((result-attrs (xml-node-attributes child)))
-          (setq success (string= (cdr (assq 'success result-attrs)) "true"))
+        (setq found-overall-result t)
+        (let* ((result-attrs (xml-node-attributes child))
+               (success-attr (cdr (assq 'success result-attrs))))
+          (catch2--debug "OverallResult for '%s': success-attr='%s'" name success-attr)
+          (setq success (string= success-attr "true"))
           (setq durationInSeconds (string-to-number
                                    (or (cdr (assq 'durationInSeconds result-attrs)) "0.0")))
           (setq skips (string-to-number
                        (or (cdr (assq 'skips result-attrs)) "0"))))))
+
+    (unless found-overall-result
+      (catch2--debug "WARNING: No OverallResult found for test case '%s'" name))
 
     (catch2--debug "Parsed test case: %s (success: %s, durationInSeconds: %.3fs, skips: %d, tags: %S)"
                    name success durationInSeconds skips tags)
@@ -146,15 +153,42 @@ Return plist with all test case attributes and overall result data."
       :skips ,skips
       :raw-attrs ,attrs)))
 
+(defun catch2--sanitize-xml-buffer ()
+  "Remove invalid XML characters from current buffer.
+XML 1.0 only allows: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]"
+  (goto-char (point-min))
+  ;; Remove control characters except tab (9), newline (10), carriage return (13)
+  ;; This regex matches control chars 0-8, 11-12, 14-31
+  (let ((count 0))
+    (while (re-search-forward "[\x00-\x08\x0B\x0C\x0E-\x1F]" nil t)
+      (replace-match "" t t)
+      (cl-incf count))
+    (when (> count 0)
+      (catch2--debug "Sanitized %d invalid XML characters" count))))
+
+(defun catch2--validate-xml-file (xml-file)
+  "Check if XML-FILE appears to be a complete Catch2 XML file.
+Returns nil if file is truncated or incomplete, t otherwise."
+  (let ((size (file-attribute-size (file-attributes xml-file))))
+    (when (< size 100)
+      (catch2--debug "File %s appears truncated (only %d bytes)" xml-file size)
+      nil)))
+
 (defun catch2-parse-suite (xml-file)
   "Parse a Catch2 v3 XML suite from XML-FILE.
 Return plist with all suite attributes and test cases."
   (catch2--debug "Parsing suite file: %s" xml-file)
+  ;; Check for truncated files first
+  (let ((size (file-attribute-size (file-attributes xml-file))))
+    (when (< size 100)
+      (catch2--debug "Skipping truncated file %s (only %d bytes)" xml-file size)
+      (error "Truncated XML file (only %d bytes): %s" size xml-file)))
   (condition-case err
       (let* ((file-attributes (file-attributes xml-file))
              (modification-time (file-attribute-modification-time file-attributes))
              (xml (with-temp-buffer
                     (insert-file-contents xml-file)
+                    (catch2--sanitize-xml-buffer)
                     (xml-parse-region (point-min) (point-max))))
              (root (car xml)) ;; <Catch2TestRun ...>
              (attrs (xml-node-attributes root))
