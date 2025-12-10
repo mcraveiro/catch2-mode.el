@@ -180,6 +180,13 @@ Returns nil if file is truncated or incomplete, t otherwise."
       (catch2--debug "File %s appears truncated (only %d bytes)" xml-file size)
       nil)))
 
+(defun catch2--extract-build-config (xml-file)
+  "Extract build configuration from XML-FILE path.
+Looks for patterns like 'linux-clang-debug' or 'linux-gcc-release' in the path."
+  (let ((path (file-name-directory xml-file)))
+    (when (string-match "/\\([^/]*-\\(?:debug\\|release\\)\\)/" path)
+      (match-string 1 path))))
+
 (defun catch2-parse-suite (xml-file)
   "Parse a Catch2 v3 XML suite from XML-FILE.
 Return plist with all suite attributes and test cases."
@@ -199,6 +206,7 @@ Return plist with all suite attributes and test cases."
              (root (car xml)) ;; <Catch2TestRun ...>
              (attrs (xml-node-attributes root))
              (name (cdr (assq 'name attrs)))
+             (preset (catch2--extract-build-config xml-file))
              (rng-seed (cdr (assq 'rng-seed attrs)))
              (xml-format-version (cdr (assq 'xml-format-version attrs)))
              (catch2-version (cdr (assq 'catch2-version attrs)))
@@ -222,6 +230,7 @@ Return plist with all suite attributes and test cases."
             (setq overall-results-cases (xml-node-attributes node)))))
 
         (let ((suite-plist `(:name ,name
+                            :preset ,preset
                             :cases ,(nreverse cases)
                             :file ,xml-file
                             :modification-time ,modification-time
@@ -248,6 +257,7 @@ Return list of plists with suite summary information."
   (mapcar (lambda (suite)
             (catch2--debug "Processing suite: %S" suite)
             (let* ((suite-name (plist-get suite :name))
+                   (preset (plist-get suite :preset))
                    (cases (plist-get suite :cases))
                    (xml-file (plist-get suite :file))
                    (modification-time (plist-get suite :modification-time))
@@ -285,6 +295,7 @@ Return list of plists with suite summary information."
 
                 (let* ((unique-tags (hash-table-keys all-tags))
                       (summary `(:suite-name ,suite-name
+                                 :preset ,preset
                                  :status ,(if has-failures 'fail 'pass)
                                  :durationInSeconds ,total-durationInSeconds
                                  :tags ,(mapconcat 'identity unique-tags ", ")
@@ -428,10 +439,11 @@ Return a plist with combined totals across all test suites."
   "Major mode for viewing Catch2 test suites in a tabulated list."
   (setq tabulated-list-format
         [("Status" 8 t)
-         ("Suite Name" 40 t)
-         ("Tests" 8 t :right-align t)
-         ("Duration" 12 t :right-align t)
-         ("Fails" 8 t :right-align t)
+         ("Suite Name" 30 t)
+         ("Preset" 20 t)
+         ("Tests" 6 t :right-align t)
+         ("Duration" 10 t :right-align t)
+         ("Fails" 6 t :right-align t)
          ("Modified" 16 t)])
   (setq tabulated-list-padding 2)
   (setq tabulated-list-sort-key (cons "Suite Name" nil))
@@ -467,12 +479,13 @@ DIRECTORY is the directory to search for XML files."
         ;; Store the search directory for reload
         (setq catch2--search-directory search-dir)
 
-        ;; Build suite name to XML file mapping
+        ;; Build unique key to XML file mapping (suite-name + preset)
         (setq catch2--suite-files (make-hash-table :test 'equal))
         (dolist (summary summaries)
-          (puthash (plist-get summary :suite-name)
-                   (plist-get summary :xml-file)
-                   catch2--suite-files))
+          (let* ((suite-name (plist-get summary :suite-name))
+                 (preset (plist-get summary :preset))
+                 (key (if preset (format "%s|%s" suite-name preset) suite-name)))
+            (puthash key (plist-get summary :xml-file) catch2--suite-files)))
         ;; Add entry for TOTALS showing the search directory
         (puthash "TOTALS" short-dir catch2--suite-files)
 
@@ -480,11 +493,15 @@ DIRECTORY is the directory to search for XML files."
         (setq tabulated-list-entries
               (append
                (mapcar (lambda (summary)
-                         (let ((fail-count (plist-get summary :fail-count))
-                               (mod-time (plist-get summary :modification-time))
-                               (status (plist-get summary :status))
-                               (suite-name (plist-get summary :suite-name)))
-                           (list suite-name ; key
+                         (let* ((fail-count (plist-get summary :fail-count))
+                                (mod-time (plist-get summary :modification-time))
+                                (status (plist-get summary :status))
+                                (suite-name (plist-get summary :suite-name))
+                                (preset (or (plist-get summary :preset) ""))
+                                (key (if (string-empty-p preset)
+                                         suite-name
+                                       (format "%s|%s" suite-name preset))))
+                           (list key ; unique key
                                  (vector
                                   (propertize
                                    (if (eq status 'pass) "✓ PASS" "✗ FAIL")
@@ -492,6 +509,7 @@ DIRECTORY is the directory to search for XML files."
                                            '(:foreground "green" :weight bold)
                                          '(:foreground "red" :weight bold)))
                                   suite-name
+                                  preset
                                   (number-to-string (plist-get summary :test-count))
                                   (format "%.3fs" (plist-get summary :durationInSeconds))
                                   (propertize (number-to-string fail-count)
@@ -514,6 +532,7 @@ DIRECTORY is the directory to search for XML files."
                                      '(:foreground "red" :weight bold :height 1.1)))
                               (propertize "TOTALS"
                                           'face '(:weight bold :height 1.1))
+                              ""  ; empty preset for totals
                               (propertize (number-to-string (plist-get totals-summary :test-count))
                                          'face '(:weight bold :height 1.1))
                               (propertize (format "%.3fs" (plist-get totals-summary :durationInSeconds))
@@ -546,23 +565,31 @@ DIRECTORY is the directory to search for XML files."
 (defun catch2-tabulated-view-suite ()
   "View details of the test suite at point."
   (interactive)
-  (let ((suite-name (tabulated-list-get-id)))
-    (if suite-name
-        (let ((suites (catch2-parse-all-suites))
+  (let ((key (tabulated-list-get-id)))
+    (if key
+        (let ((suites (catch2-parse-all-suites catch2--search-directory))
               (found nil))
-          (if (string= suite-name "TOTALS")
+          (if (string= key "TOTALS")
               ;; Show all test cases from all suites
               (let ((all-cases (cl-loop for suite in suites
-                                      append (plist-get suite :cases))))
+                                        append (plist-get suite :cases))))
                 (catch2-display-testcases all-cases "ALL SUITES"))
-            ;; Show test cases for specific suite
-            (dolist (suite suites)
-              (when (string= (plist-get suite :name) suite-name)
-                (setq found suite)
-                (catch2-display-testcases (plist-get suite :cases) suite-name)))
-            (unless found
-              (message "Suite '%s' not found" suite-name)))
-      (message "No suite at point")))))
+            ;; Parse the key to get suite-name and preset
+            (let* ((parts (split-string key "|"))
+                   (suite-name (car parts))
+                   (preset (cadr parts)))
+              ;; Show test cases for specific suite matching both name and preset
+              (dolist (suite suites)
+                (when (and (string= (plist-get suite :name) suite-name)
+                           (equal (plist-get suite :preset) preset))
+                  (setq found suite)
+                  (catch2-display-testcases (plist-get suite :cases)
+                                            (if preset
+                                                (format "%s [%s]" suite-name preset)
+                                              suite-name))))
+              (unless found
+                (message "Suite '%s' not found" key)))))
+      (message "No suite at point"))))
 
 (defun catch2-display-testcases (cases suite-name)
   "Display test cases in a tabulated list buffer.
@@ -619,16 +646,21 @@ CASES is a list of test case plists, SUITE-NAME is the name of the suite."
 (defun catch2-find-log-file (xml-file test-suite-name test-case-name)
   "Find the log file for a test case.
 XML-FILE is the path to the XML results file.
-TEST-SUITE-NAME is the name of the test suite.
+TEST-SUITE-NAME is the name of the test suite (may include [preset] suffix in display).
 TEST-CASE-NAME is the name of the test case.
 Returns the path to the log file or nil if not found."
   (let* ((xml-dir (file-name-directory xml-file))
          (log-dir (expand-file-name "../log" xml-dir))
-         (suite-log-dir (expand-file-name test-suite-name log-dir))
+         ;; Strip any [preset] suffix from suite name for log directory lookup
+         (base-suite-name (if (string-match "^\\(.+\\) \\[.+\\]$" test-suite-name)
+                              (match-string 1 test-suite-name)
+                            test-suite-name))
+         (suite-log-dir (expand-file-name base-suite-name log-dir))
          (log-pattern (format "%s*.log" test-case-name))
          (log-files (when (file-exists-p suite-log-dir)
                       (directory-files-recursively suite-log-dir log-pattern))))
     (catch2--debug "Looking for log file: XML=%s, suite=%s, test=%s" xml-file test-suite-name test-case-name)
+    (catch2--debug "Base suite name: %s" base-suite-name)
     (catch2--debug "Log directory: %s" suite-log-dir)
     (catch2--debug "Log pattern: %s" log-pattern)
     (catch2--debug "Found log files: %S" log-files)
