@@ -23,7 +23,6 @@
 ;; A major mode for displaying Catch2 test results in a tabulated list.
 
 ;;; Code:
-
 (require 'cl-lib)
 (require 'xml)
 (require 'subr-x)
@@ -151,46 +150,52 @@ Return plist with all test case attributes and overall result data."
   "Parse a Catch2 v3 XML suite from XML-FILE.
 Return plist with all suite attributes and test cases."
   (catch2--debug "Parsing suite file: %s" xml-file)
-  (let* ((file-attributes (file-attributes xml-file))
-         (modification-time (file-attribute-modification-time file-attributes))
-         (xml (with-temp-buffer
-                (insert-file-contents xml-file)
-                (xml-parse-region (point-min) (point-max))))
-         (root (car xml)) ;; <Catch2TestRun ...>
-         (attrs (xml-node-attributes root))
-         (name (cdr (assq 'name attrs)))
-         (rng-seed (cdr (assq 'rng-seed attrs)))
-         (xml-format-version (cdr (assq 'xml-format-version attrs)))
-         (catch2-version (cdr (assq 'catch2-version attrs)))
-         (children (xml-node-children root))
-         cases
-         overall-results
-         overall-results-cases)
+  (condition-case err
+      (let* ((file-attributes (file-attributes xml-file))
+             (modification-time (file-attribute-modification-time file-attributes))
+             (xml (with-temp-buffer
+                    (insert-file-contents xml-file)
+                    (xml-parse-region (point-min) (point-max))))
+             (root (car xml)) ;; <Catch2TestRun ...>
+             (attrs (xml-node-attributes root))
+             (name (cdr (assq 'name attrs)))
+             (rng-seed (cdr (assq 'rng-seed attrs)))
+             (xml-format-version (cdr (assq 'xml-format-version attrs)))
+             (catch2-version (cdr (assq 'catch2-version attrs)))
+             (children (xml-node-children root))
+             cases
+             overall-results
+             overall-results-cases)
 
-    ;; Collect <TestCase> nodes
-    (dolist (node children)
-      (cond
-       ((and (consp node) (eq (car node) 'TestCase))
-        (push (catch2-parse-testcase node xml-file) cases))
-       ((and (consp node) (eq (car node) 'OverallResults))
-        (setq overall-results (xml-node-attributes node)))
-       ((and (consp node) (eq (car node) 'OverallResultsCases))
-        (setq overall-results-cases (xml-node-attributes node)))))
+        ;; Validate we have a proper XML structure
+        (unless (and (consp root) (eq (car root) 'Catch2TestRun))
+          (error "Not a valid Catch2 XML file: %s" xml-file))
 
-    (let ((suite-plist `(:name ,name
-                        :cases ,(nreverse cases)
-                        :file ,xml-file
-                        :modification-time ,modification-time
-                        :rng-seed ,rng-seed
-                        :xml-format-version ,xml-format-version
-                        :catch2-version ,catch2-version
-                        :overall-results ,overall-results
-                        :overall-results-cases ,overall-results-cases
-                        :raw-attrs ,attrs)))
-      (catch2--debug "Parsed suite: %s with %d test cases" name (length cases))
-      (catch2--debug "Suite attributes: rng-seed=%s, xml-format-version=%s, catch2-version=%s, modification-time=%S"
-                     rng-seed xml-format-version catch2-version modification-time)
-      suite-plist)))
+        ;; Collect <TestCase> nodes
+        (dolist (node children)
+          (cond
+           ((and (consp node) (eq (car node) 'TestCase))
+            (push (catch2-parse-testcase node xml-file) cases))
+           ((and (consp node) (eq (car node) 'OverallResults))
+            (setq overall-results (xml-node-attributes node)))
+           ((and (consp node) (eq (car node) 'OverallResultsCases))
+            (setq overall-results-cases (xml-node-attributes node)))))
+
+        (let ((suite-plist `(:name ,name
+                            :cases ,(nreverse cases)
+                            :file ,xml-file
+                            :modification-time ,modification-time
+                            :rng-seed ,rng-seed
+                            :xml-format-version ,xml-format-version
+                            :catch2-version ,catch2-version
+                            :overall-results ,overall-results
+                            :overall-results-cases ,overall-results-cases
+                            :raw-attrs ,attrs)))
+          (catch2--debug "Parsed suite: %s with %d test cases" name (length cases))
+          suite-plist))
+    (error
+     (catch2--debug "Error parsing XML file %s: %s" xml-file (error-message-string err))
+     (error "Failed to parse Catch2 XML file %s: %s" xml-file (error-message-string err)))))
 
 ;;
 ;; Post-processing
@@ -309,17 +314,20 @@ Return a plist with combined totals across all test suites."
 (defvar catch2-tabulated-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
-    (define-key map (kbd "RET") 'catch2-tabulated-view-suite)
-    (define-key map (kbd "g") 'catch2-tabulated-reload)
-    map))
+    (define-key map (kbd "RET") #'catch2-tabulated-view-suite)
+    (define-key map (kbd "g") #'catch2-tabulated-reload)
+    map)
+  "Keymap for `catch2-tabulated-mode'.")
 
 (defvar catch2-testcases-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
-    (define-key map (kbd "g") 'catch2-testcases-reload)
-    (define-key map (kbd "t") 'catch2-testcases-open-file)
-    (define-key map (kbd "l") 'catch2-testcases-open-log)
-    map))
+    (define-key map (kbd "g") #'catch2-testcases-reload)
+    (define-key map (kbd "t") #'catch2-testcases-open-file)
+    (define-key map (kbd "l") #'catch2-testcases-open-log)
+    (define-key map (kbd "RET") #'catch2-testcases-open-file) ; Add RET to open file too
+    map)
+  "Keymap for `catch2-testcases-mode'.")
 
 (defvar catch2-tabulated-mode-hook nil
   "Hook run when entering `catch2-tabulated-mode'.")
@@ -559,11 +567,6 @@ Returns the path to the log file or nil if not found."
 
     (car log-files))) ; Return the first matching log file
 
-;;
-;; Testing
-;;
-
-;; Test function
 (defun catch2-test-summaries ()
   "Test function to generate suite summaries."
   (interactive)
@@ -591,17 +594,10 @@ Return list of suite plists."
          (message "Error parsing %s: %s" file (error-message-string err)))))
     (nreverse suites)))
 
-;; Test function to verify it works
-(defun catch2-test-parse-tags ()
-  "Test function for tag parsing."
+(defun catch2 ()
+  "Open the Catch2 test suites overview."
   (interactive)
-  (let ((test-cases '("[handler][messaging][#messaging_risk_message_handler_tests]"
-                      "[parsing][#parser_tests]"
-                      "[#single_tag]"
-                      "[]"
-                      nil)))
-    (dolist (tags test-cases)
-      (message "Input: %-60s Output: %S" tags (catch2-parse-tags tags)))))
+  (catch2-tabulated-display))
 
 (provide 'catch2-mode)
 ;;; catch2-mode.el ends here
