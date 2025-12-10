@@ -439,14 +439,14 @@ Return a plist with combined totals across all test suites."
   "Major mode for viewing Catch2 test suites in a tabulated list."
   (setq tabulated-list-format
         [("Status" 8 t)
-         ("Suite Name" 30 t)
          ("Preset" 20 t)
+         ("Suite Name" 30 t)
          ("Tests" 6 t :right-align t)
          ("Duration" 10 t :right-align t)
          ("Fails" 6 t :right-align t)
          ("Modified" 16 t)])
   (setq tabulated-list-padding 2)
-  (setq tabulated-list-sort-key (cons "Suite Name" nil))
+  (setq tabulated-list-sort-key '("Preset" . nil))
   (tabulated-list-init-header)
   (add-hook 'post-command-hook #'catch2--show-current-file nil t)
   (run-hooks 'catch2-tabulated-mode-hook))
@@ -508,8 +508,8 @@ DIRECTORY is the directory to search for XML files."
                                    'face (if (eq status 'pass)
                                            '(:foreground "green" :weight bold)
                                          '(:foreground "red" :weight bold)))
-                                  suite-name
                                   preset
+                                  suite-name
                                   (number-to-string (plist-get summary :test-count))
                                   (format "%.3fs" (plist-get summary :durationInSeconds))
                                   (propertize (number-to-string fail-count)
@@ -530,9 +530,9 @@ DIRECTORY is the directory to search for XML files."
                                'face (if (eq total-status 'pass)
                                        '(:foreground "green" :weight bold :height 1.1)
                                      '(:foreground "red" :weight bold :height 1.1)))
+                              ""  ; empty preset for totals
                               (propertize "TOTALS"
                                           'face '(:weight bold :height 1.1))
-                              ""  ; empty preset for totals
                               (propertize (number-to-string (plist-get totals-summary :test-count))
                                          'face '(:weight bold :height 1.1))
                               (propertize (format "%.3fs" (plist-get totals-summary :durationInSeconds))
