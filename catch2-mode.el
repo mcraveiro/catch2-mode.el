@@ -642,18 +642,18 @@ DIRECTORY is the directory to search for XML files."
                                   (stale (and mod-time newest-mod-time
                                               (> (float-time (time-subtract newest-mod-time mod-time))
                                                  300)))) ; 300 seconds = 5 minutes
+                             (let ((status-color (if (eq status 'pass) "green" "red"))
+                                  (row-color (cond
+                                              (stale "yellow")
+                                              ((eq status 'pass) "green")
+                                              (t "red"))))
                              (list key ; unique key
                                    (vector
                                     (propertize
                                      (if (eq status 'pass) "✓ PASS" "✗ FAIL")
-                                     'face (cond
-                                            (stale '(:foreground "yellow" :weight bold))
-                                            ((eq status 'pass) '(:foreground "green" :weight bold))
-                                            (t '(:foreground "red" :weight bold))))
+                                     'face `(:foreground ,status-color :weight bold))
                                     preset
-                                    (if stale
-                                        (propertize suite-name 'face '(:foreground "yellow"))
-                                      suite-name)
+                                    (propertize suite-name 'face `(:foreground ,row-color))
                                     (number-to-string (plist-get summary :test-count))
                                     (format "%.3fs" (plist-get summary :durationInSeconds))
                                     (propertize (number-to-string fail-count)
@@ -662,22 +662,21 @@ DIRECTORY is the directory to search for XML files."
                                                       'default))
                                     (if mod-time
                                         (propertize (format-time-string "%Y-%m-%d %H:%M" mod-time)
-                                                    'face (if stale '(:foreground "yellow") 'default))
-                                      "N/A")))))
+                                                    'face `(:foreground ,row-color))
+                                      "N/A"))))))
                           summaries)
                  (list (list "TOTALS" ; key for totals row
-                             (let ((total-fail-count (plist-get totals-summary :fail-count))
-                                   (total-status (plist-get totals-summary :status))
-                                   (oldest-mod-time (plist-get totals-summary :modification-time)))
+                             (let* ((total-fail-count (plist-get totals-summary :fail-count))
+                                    (total-status (plist-get totals-summary :status))
+                                    (newest-mod-time-totals (plist-get totals-summary :modification-time))
+                                    (total-color (if (eq total-status 'pass) "green" "red")))
                                (vector
                                 (propertize
                                  (if (eq total-status 'pass) "✓ PASS" "✗ FAIL")
-                                 'face (if (eq total-status 'pass)
-                                         '(:foreground "green" :weight bold :height 1.1)
-                                       '(:foreground "red" :weight bold :height 1.1)))
+                                 'face `(:foreground ,total-color :weight bold :height 1.1))
                                 ""  ; empty preset for totals
                                 (propertize "TOTALS"
-                                            'face '(:weight bold :height 1.1))
+                                            'face `(:foreground ,total-color :weight bold :height 1.1))
                                 (propertize (number-to-string (plist-get totals-summary :test-count))
                                            'face '(:weight bold :height 1.1))
                                 (propertize (format "%.3fs" (plist-get totals-summary :durationInSeconds))
@@ -686,8 +685,9 @@ DIRECTORY is the directory to search for XML files."
                                            'face (if (> total-fail-count 0)
                                                    '(:foreground "red" :weight bold :height 1.1)
                                                  '(:weight bold :height 1.1)))
-                                (if oldest-mod-time
-                                    (format-time-string "%Y-%m-%d %H:%M" oldest-mod-time)
+                                (if newest-mod-time-totals
+                                    (propertize (format-time-string "%Y-%m-%d %H:%M" newest-mod-time-totals)
+                                                'face `(:foreground ,total-color :height 1.1))
                                   "N/A"))))))))
 
         (tabulated-list-print)
