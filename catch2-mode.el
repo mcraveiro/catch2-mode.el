@@ -53,11 +53,24 @@ The output file argument (-o) is added automatically."
   :type '(repeat string)
   :group 'catch2-mode)
 
+(defcustom catch2-preset-colors '("dodger blue" "dark orchid" "deep sky blue"
+                                   "medium purple" "steel blue" "slate blue"
+                                   "royal blue" "medium slate blue" "cornflower blue"
+                                   "blue violet")
+  "List of colors to use for different presets.
+Colors are assigned to presets in the order they are encountered.
+Avoid yellow, green, and red as these are used for status indicators."
+  :type '(repeat color)
+  :group 'catch2-mode)
+
 (defvar-local catch2--search-directory nil
   "The directory used to search for Catch2 XML files in this buffer.")
 
 (defvar-local catch2--suite-files nil
   "Hash table mapping suite names to their XML file paths.")
+
+(defvar-local catch2--preset-color-map nil
+  "Hash table mapping preset names to their assigned colors.")
 
 ;;
 ;; Debugging
@@ -77,6 +90,19 @@ FORMAT-STRING and ARGS are passed to `format'."
       (insert (format "[%s] %s\n"
                       (format-time-string "%Y-%m-%dT%H:%M:%S.%3N")
                       (apply #'format format-string args))))))
+
+(defun catch2--get-preset-color (preset)
+  "Get the color assigned to PRESET, assigning a new one if needed.
+Returns nil if PRESET is nil or empty."
+  (when (and preset (not (string-empty-p preset)))
+    (unless catch2--preset-color-map
+      (setq catch2--preset-color-map (make-hash-table :test 'equal)))
+    (or (gethash preset catch2--preset-color-map)
+        (let* ((color-index (hash-table-count catch2--preset-color-map))
+               (color (nth (mod color-index (length catch2-preset-colors))
+                           catch2-preset-colors)))
+          (puthash preset color catch2--preset-color-map)
+          color))))
 
 ;;
 ;; Files
@@ -652,7 +678,10 @@ DIRECTORY is the directory to search for XML files."
                                     (propertize
                                      (if (eq status 'pass) "✓ PASS" "✗ FAIL")
                                      'face `(:foreground ,status-color :weight bold))
-                                    preset
+                                    (let ((preset-color (catch2--get-preset-color preset)))
+                                      (if preset-color
+                                          (propertize preset 'face `(:foreground ,preset-color))
+                                        preset))
                                     (propertize suite-name 'face `(:foreground ,row-color))
                                     (number-to-string (plist-get summary :test-count))
                                     (format "%.3fs" (plist-get summary :durationInSeconds))
