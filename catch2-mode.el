@@ -419,7 +419,7 @@ Return a plist with combined totals across all test suites."
   (let* ((key (tabulated-list-get-id))
          (xml-file (when key (gethash key catch2--suite-files))))
     (if (and xml-file (not (string= key "TOTALS")))
-        (find-file xml-file)
+        (find-file-other-window xml-file)
       (message "No XML file for this entry"))))
 
 (defun catch2-tabulated-delete-xml ()
@@ -556,7 +556,7 @@ Updates the display to reflect the new state."
                (log-file (catch2-find-log-file xml-file suite-name test-name)))
           (if log-file
               (progn
-                (find-file log-file)
+                (find-file-other-window log-file)
                 (goto-char (point-max))
                 (message "Opened log file: %s" log-file))
             (message "No log file found for test case: %s" test-name)))
@@ -872,7 +872,7 @@ CASES is a list of test case plists, SUITE-NAME is the name of the suite."
                     cases))
 
       (tabulated-list-print)
-      (switch-to-buffer (current-buffer)))))
+      (pop-to-buffer (current-buffer) '(display-buffer-use-some-window)))))
 
 (defun catch2-testcases-open-file ()
   "Open the test case file at the line number."
@@ -885,7 +885,7 @@ CASES is a list of test case plists, SUITE-NAME is the name of the suite."
                  (string-to-number line-str))))
     (if (and full-filename line (> line 0))
         (progn
-          (find-file full-filename)
+          (find-file-other-window full-filename)
           (goto-char (point-min))
           (forward-line (1- line)))
       (message "No file location available for this test case"))))
