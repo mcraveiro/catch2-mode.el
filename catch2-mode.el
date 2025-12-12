@@ -72,6 +72,15 @@ Avoid yellow, green, and red as these are used for status indicators."
 (defvar-local catch2--preset-color-map nil
   "Hash table mapping preset names to their assigned colors.")
 
+(defvar-local catch2--running-suites nil
+  "Hash table of test suites currently running (key -> t).")
+
+(defvar-local catch2--cached-summaries nil
+  "Cached list of suite summaries for fast refresh.")
+
+(defvar-local catch2--cached-totals nil
+  "Cached totals summary for fast refresh.")
+
 ;;
 ;; Debugging
 ;;
@@ -434,61 +443,88 @@ Removes 'test-results-' prefix and '.xml' extension."
                      (string-remove-prefix "test-results-" name))))
     (expand-file-name exe-name dir)))
 
+(defun catch2--suite-running-p (key)
+  "Return non-nil if test suite KEY is currently running."
+  (and catch2--running-suites
+       (gethash key catch2--running-suites)))
+
+(defun catch2--mark-suite-running (key running)
+  "Mark test suite KEY as RUNNING (t) or not running (nil).
+Updates the display to reflect the new state."
+  (unless catch2--running-suites
+    (setq catch2--running-suites (make-hash-table :test 'equal)))
+  (if running
+      (puthash key t catch2--running-suites)
+    (remhash key catch2--running-suites))
+  ;; Refresh display to show running state - need full reload to regenerate entries
+  (when (eq major-mode 'catch2-tabulated-mode)
+    (catch2--refresh-entries)))
+
 (defun catch2-tabulated-run-tests ()
   "Run the tests for the test suite at point."
   (interactive)
   (let* ((key (tabulated-list-get-id))
          (xml-file (when key (expand-file-name (gethash key catch2--suite-files)))))
-    (if (and xml-file (not (string= key "TOTALS")))
-        (let* ((executable (catch2--xml-to-executable xml-file))
-               (args (append catch2-test-arguments (list "-o" xml-file)))
-               (default-directory (file-name-directory executable))
-               (buffer-name (format "*catch2-run: %s*" (file-name-nondirectory executable)))
-               (cmd-line (format "%s %s" executable (string-join args " "))))
-          (catch2--debug "Run tests: executable=%s" executable)
-          (catch2--debug "Run tests: args=%S" args)
-          (catch2--debug "Run tests: default-directory=%s" default-directory)
-          (catch2--debug "Run tests: full command: %s" cmd-line)
-          (if (file-executable-p executable)
-              (progn
-                (message "Running %s..." (file-name-nondirectory executable))
-                (with-current-buffer (get-buffer-create buffer-name)
-                  (erase-buffer)
-                  (insert (format "Command: %s\n" cmd-line))
-                  (insert (format "Directory: %s\n" default-directory))
-                  (insert (format "Started: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
-                  (insert "--- Output ---\n\n"))
-                (let ((proc (apply #'start-process
-                                   (file-name-nondirectory executable)
-                                   buffer-name
-                                   executable
-                                   args)))
-                  (set-process-sentinel
-                   proc
-                   (lambda (proc event)
-                     (catch2--debug "Run tests: process event: %s" (string-trim event))
+    (cond
+     ((or (not xml-file) (string= key "TOTALS"))
+      (message "No test suite at point"))
+     ((catch2--suite-running-p key)
+      (message "Test suite is already running"))
+     (t
+      (let* ((executable (catch2--xml-to-executable xml-file))
+             (args (append catch2-test-arguments (list "-o" xml-file)))
+             (default-directory (file-name-directory executable))
+             (buffer-name (format "*catch2-run: %s*" (file-name-nondirectory executable)))
+             (cmd-line (format "%s %s" executable (string-join args " ")))
+             (catch2-buffer (current-buffer)))
+        (catch2--debug "Run tests: executable=%s" executable)
+        (catch2--debug "Run tests: args=%S" args)
+        (catch2--debug "Run tests: default-directory=%s" default-directory)
+        (catch2--debug "Run tests: full command: %s" cmd-line)
+        (if (file-executable-p executable)
+            (progn
+              (catch2--mark-suite-running key t)
+              (message "Running %s..." (file-name-nondirectory executable))
+              (with-current-buffer (get-buffer-create buffer-name)
+                (erase-buffer)
+                (insert (format "Command: %s\n" cmd-line))
+                (insert (format "Directory: %s\n" default-directory))
+                (insert (format "Started: %s\n\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
+                (insert "--- Output ---\n\n"))
+              (let ((proc (apply #'start-process
+                                 (file-name-nondirectory executable)
+                                 buffer-name
+                                 executable
+                                 args)))
+                (set-process-sentinel
+                 proc
+                 (lambda (proc event)
+                   (catch2--debug "Run tests: process event: %s" (string-trim event))
+                   (with-current-buffer (process-buffer proc)
+                     (goto-char (point-max))
+                     (insert (format "\n--- Process %s ---\n" (string-trim event)))
+                     (insert (format "Exit code: %s\n" (process-exit-status proc))))
+                   (catch2--debug "Run tests: exit code=%s" (process-exit-status proc))
+                   (when (string-match-p "finished\\|exited" event)
+                     (message "Test run completed: %s (exit code %d)"
+                              (string-trim event)
+                              (process-exit-status proc))
+                     ;; Clear running state and reload
+                     (when (buffer-live-p catch2-buffer)
+                       (with-current-buffer catch2-buffer
+                         (catch2--mark-suite-running key nil)
+                         (catch2-tabulated-reload))))))
+                (set-process-filter
+                 proc
+                 (lambda (proc output)
+                   (catch2--debug "Run tests: output chunk: %s" (substring output 0 (min 200 (length output))))
+                   (when (buffer-live-p (process-buffer proc))
                      (with-current-buffer (process-buffer proc)
                        (goto-char (point-max))
-                       (insert (format "\n--- Process %s ---\n" (string-trim event)))
-                       (insert (format "Exit code: %s\n" (process-exit-status proc))))
-                     (catch2--debug "Run tests: exit code=%s" (process-exit-status proc))
-                     (when (string-match-p "finished\\|exited" event)
-                       (message "Test run completed: %s (exit code %d)"
-                                (string-trim event)
-                                (process-exit-status proc))
-                       (catch2-tabulated-reload))))
-                  (set-process-filter
-                   proc
-                   (lambda (proc output)
-                     (catch2--debug "Run tests: output chunk: %s" (substring output 0 (min 200 (length output))))
-                     (when (buffer-live-p (process-buffer proc))
-                       (with-current-buffer (process-buffer proc)
-                         (goto-char (point-max))
-                         (insert output)))))))
-            (progn
-              (catch2--debug "Run tests: executable not found: %s" executable)
-              (message "Executable not found: %s" executable))))
-      (message "No test suite at point"))))
+                       (insert output)))))))
+          (progn
+            (catch2--debug "Run tests: executable not found: %s" executable)
+            (message "Executable not found: %s" executable))))))))
 
 (defun catch2-testcases-reload ()
   "Reload the current test cases view."
@@ -608,6 +644,100 @@ Removes 'test-results-' prefix and '.xml' extension."
 ;; Add hl-line-mode to the hook
 (add-hook 'catch2-tabulated-mode-hook #'hl-line-mode)
 
+(defun catch2--build-entries (summaries totals-summary)
+  "Build tabulated list entries from SUMMARIES and TOTALS-SUMMARY.
+Uses `catch2--running-suites' to determine running state."
+  ;; Find the most recent modification time
+  (let ((newest-mod-time nil))
+    (dolist (summary summaries)
+      (let ((mod-time (plist-get summary :modification-time)))
+        (when (and mod-time
+                   (or (null newest-mod-time)
+                       (time-less-p newest-mod-time mod-time)))
+          (setq newest-mod-time mod-time))))
+
+    ;; Combine regular summaries with totals
+    (append
+     (mapcar (lambda (summary)
+               (let* ((fail-count (plist-get summary :fail-count))
+                      (mod-time (plist-get summary :modification-time))
+                      (status (plist-get summary :status))
+                      (suite-name (plist-get summary :suite-name))
+                      (preset (or (plist-get summary :preset) ""))
+                      (key (if (string-empty-p preset)
+                               suite-name
+                             (format "%s|%s" suite-name preset)))
+                      ;; Check if stale (> 5 mins older than newest)
+                      (stale (and mod-time newest-mod-time
+                                  (> (float-time (time-subtract newest-mod-time mod-time))
+                                     300))) ; 300 seconds = 5 minutes
+                      (running (catch2--suite-running-p key)))
+                 (let* ((status-color (cond
+                                       (running "orange")
+                                       ((eq status 'pass) "green")
+                                       (t "red")))
+                        (row-color (cond
+                                    (running "orange")
+                                    (stale "yellow")
+                                    ((eq status 'pass) "green")
+                                    (t "red")))
+                        (status-text (cond
+                                      (running "⟳ RUN")
+                                      ((eq status 'pass) "✓ PASS")
+                                      (t "✗ FAIL"))))
+                   (list key ; unique key
+                         (vector
+                          (propertize status-text
+                                      'face `(:foreground ,status-color :weight bold))
+                          (let ((preset-color (catch2--get-preset-color preset)))
+                            (if preset-color
+                                (propertize preset 'face `(:foreground ,preset-color))
+                              preset))
+                          (propertize suite-name 'face `(:foreground ,row-color))
+                          (number-to-string (plist-get summary :test-count))
+                          (format "%.3fs" (plist-get summary :durationInSeconds))
+                          (propertize (number-to-string fail-count)
+                                      'face (if (> fail-count 0)
+                                                '(:foreground "red" :weight bold)
+                                              'default))
+                          (if mod-time
+                              (propertize (format-time-string "%Y-%m-%d %H:%M" mod-time)
+                                          'face `(:foreground ,row-color))
+                            "N/A"))))))
+             summaries)
+     (list (list "TOTALS" ; key for totals row
+                 (let* ((total-fail-count (plist-get totals-summary :fail-count))
+                        (total-status (plist-get totals-summary :status))
+                        (newest-mod-time-totals (plist-get totals-summary :modification-time))
+                        (total-color (if (eq total-status 'pass) "green" "red")))
+                   (vector
+                    (propertize
+                     (if (eq total-status 'pass) "✓ PASS" "✗ FAIL")
+                     'face `(:foreground ,total-color :weight bold :height 1.1))
+                    ""  ; empty preset for totals
+                    (propertize "TOTALS"
+                                'face `(:foreground ,total-color :weight bold :height 1.1))
+                    (propertize (number-to-string (plist-get totals-summary :test-count))
+                                'face '(:weight bold :height 1.1))
+                    (propertize (format "%.3fs" (plist-get totals-summary :durationInSeconds))
+                                'face '(:weight bold :height 1.1))
+                    (propertize (number-to-string total-fail-count)
+                                'face (if (> total-fail-count 0)
+                                          '(:foreground "red" :weight bold :height 1.1)
+                                        '(:weight bold :height 1.1)))
+                    (if newest-mod-time-totals
+                        (propertize (format-time-string "%Y-%m-%d %H:%M" newest-mod-time-totals)
+                                    'face `(:foreground ,total-color :height 1.1))
+                      "N/A"))))))))
+
+(defun catch2--refresh-entries ()
+  "Refresh tabulated list entries from cached summaries.
+This is a fast refresh that doesn't re-parse XML files."
+  (when (and catch2--cached-summaries catch2--cached-totals)
+    (setq tabulated-list-entries
+          (catch2--build-entries catch2--cached-summaries catch2--cached-totals))
+    (tabulated-list-print t)))
+
 (defun catch2-tabulated-display (&optional directory)
   "Display Catch2 test suites in a tabulated list buffer.
 DIRECTORY is the directory to search for XML files."
@@ -643,81 +773,13 @@ DIRECTORY is the directory to search for XML files."
         ;; Add entry for TOTALS showing the search directory
         (puthash "TOTALS" short-dir catch2--suite-files)
 
-        ;; Find the most recent modification time
-        (let ((newest-mod-time nil))
-          (dolist (summary summaries)
-            (let ((mod-time (plist-get summary :modification-time)))
-              (when (and mod-time
-                         (or (null newest-mod-time)
-                             (time-less-p newest-mod-time mod-time)))
-                (setq newest-mod-time mod-time))))
+        ;; Cache summaries for fast refresh when running state changes
+        (setq catch2--cached-summaries summaries)
+        (setq catch2--cached-totals totals-summary)
 
-          ;; Combine regular summaries with totals
-          (setq tabulated-list-entries
-                (append
-                 (mapcar (lambda (summary)
-                           (let* ((fail-count (plist-get summary :fail-count))
-                                  (mod-time (plist-get summary :modification-time))
-                                  (status (plist-get summary :status))
-                                  (suite-name (plist-get summary :suite-name))
-                                  (preset (or (plist-get summary :preset) ""))
-                                  (key (if (string-empty-p preset)
-                                           suite-name
-                                         (format "%s|%s" suite-name preset)))
-                                  ;; Check if stale (> 5 mins older than newest)
-                                  (stale (and mod-time newest-mod-time
-                                              (> (float-time (time-subtract newest-mod-time mod-time))
-                                                 300)))) ; 300 seconds = 5 minutes
-                             (let ((status-color (if (eq status 'pass) "green" "red"))
-                                  (row-color (cond
-                                              (stale "yellow")
-                                              ((eq status 'pass) "green")
-                                              (t "red"))))
-                             (list key ; unique key
-                                   (vector
-                                    (propertize
-                                     (if (eq status 'pass) "✓ PASS" "✗ FAIL")
-                                     'face `(:foreground ,status-color :weight bold))
-                                    (let ((preset-color (catch2--get-preset-color preset)))
-                                      (if preset-color
-                                          (propertize preset 'face `(:foreground ,preset-color))
-                                        preset))
-                                    (propertize suite-name 'face `(:foreground ,row-color))
-                                    (number-to-string (plist-get summary :test-count))
-                                    (format "%.3fs" (plist-get summary :durationInSeconds))
-                                    (propertize (number-to-string fail-count)
-                                                'face (if (> fail-count 0)
-                                                        '(:foreground "red" :weight bold)
-                                                      'default))
-                                    (if mod-time
-                                        (propertize (format-time-string "%Y-%m-%d %H:%M" mod-time)
-                                                    'face `(:foreground ,row-color))
-                                      "N/A"))))))
-                          summaries)
-                 (list (list "TOTALS" ; key for totals row
-                             (let* ((total-fail-count (plist-get totals-summary :fail-count))
-                                    (total-status (plist-get totals-summary :status))
-                                    (newest-mod-time-totals (plist-get totals-summary :modification-time))
-                                    (total-color (if (eq total-status 'pass) "green" "red")))
-                               (vector
-                                (propertize
-                                 (if (eq total-status 'pass) "✓ PASS" "✗ FAIL")
-                                 'face `(:foreground ,total-color :weight bold :height 1.1))
-                                ""  ; empty preset for totals
-                                (propertize "TOTALS"
-                                            'face `(:foreground ,total-color :weight bold :height 1.1))
-                                (propertize (number-to-string (plist-get totals-summary :test-count))
-                                           'face '(:weight bold :height 1.1))
-                                (propertize (format "%.3fs" (plist-get totals-summary :durationInSeconds))
-                                           'face '(:weight bold :height 1.1))
-                                (propertize (number-to-string total-fail-count)
-                                           'face (if (> total-fail-count 0)
-                                                   '(:foreground "red" :weight bold :height 1.1)
-                                                 '(:weight bold :height 1.1)))
-                                (if newest-mod-time-totals
-                                    (propertize (format-time-string "%Y-%m-%d %H:%M" newest-mod-time-totals)
-                                                'face `(:foreground ,total-color :height 1.1))
-                                  "N/A"))))))))
+        ;; Build and set entries
+        (setq tabulated-list-entries
+              (catch2--build-entries summaries totals-summary))
 
         (tabulated-list-print)
         (switch-to-buffer (current-buffer))))))
