@@ -81,6 +81,12 @@ Avoid yellow, green, and red as these are used for status indicators."
 (defvar-local catch2--cached-totals nil
   "Cached totals summary for fast refresh.")
 
+(defvar-local catch2--testcases nil
+  "Hash table mapping test case names to their full plists.")
+
+(defvar-local catch2--suite-name nil
+  "Name of the suite displayed in this buffer.")
+
 ;;
 ;; Debugging
 ;;
@@ -157,6 +163,99 @@ Output: (\"handler\" \"messaging\" \"messaging_risk_message_handler_tests\")"
       (catch2--debug "Parsed tags: '%s' -> %S" tags-string parsed-tags)
       parsed-tags)))
 
+(defun catch2--parse-expression (expr-node)
+  "Parse an <Expression> element EXPR-NODE.
+Return plist with expression details."
+  (let* ((attrs (xml-node-attributes expr-node))
+         (success-attr (cdr (assq 'success attrs)))
+         (success (and success-attr (string= success-attr "true")))
+         (type (cdr (assq 'type attrs)))
+         (filename (cdr (assq 'filename attrs)))
+         (line (string-to-number (or (cdr (assq 'line attrs)) "0")))
+         (children (xml-node-children expr-node))
+         original expanded)
+    ;; Extract Original and Expanded text
+    (dolist (child children)
+      (when (consp child)
+        (pcase (car child)
+          ('Original
+           (let ((text (catch2--xml-node-text child)))
+             (setq original (when text (string-trim text)))))
+          ('Expanded
+           (let ((text (catch2--xml-node-text child)))
+             (setq expanded (when text (string-trim text))))))))
+    `(:type expression
+      :success ,success
+      :assertion-type ,type
+      :filename ,filename
+      :line ,line
+      :original ,original
+      :expanded ,expanded)))
+
+(defun catch2--parse-exception (exc-node)
+  "Parse an <Exception> element EXC-NODE.
+Return plist with exception details."
+  (let* ((attrs (xml-node-attributes exc-node))
+         (filename (cdr (assq 'filename attrs)))
+         (line (string-to-number (or (cdr (assq 'line attrs)) "0")))
+         (text (catch2--xml-node-text exc-node))
+         (message (when text (string-trim text))))
+    `(:type exception
+      :success nil
+      :filename ,filename
+      :line ,line
+      :message ,message)))
+
+(defun catch2--parse-failure (fail-node)
+  "Parse a <Failure> element FAIL-NODE.
+Return plist with failure details."
+  (let* ((attrs (xml-node-attributes fail-node))
+         (filename (cdr (assq 'filename attrs)))
+         (line (string-to-number (or (cdr (assq 'line attrs)) "0")))
+         (text (catch2--xml-node-text fail-node))
+         (message (when text (string-trim text))))
+    `(:type failure
+      :success nil
+      :filename ,filename
+      :line ,line
+      :message ,message)))
+
+(defun catch2--xml-node-text (node)
+  "Extract all text content from XML NODE, concatenating child strings.
+Returns nil if no text content found."
+  (let ((text ""))
+    (dolist (child (xml-node-children node))
+      (when (stringp child)
+        (setq text (concat text child))))
+    (if (string-empty-p text) nil text)))
+
+(defun catch2--parse-section (section-node)
+  "Parse a <Section> element SECTION-NODE recursively.
+Return plist with section details including nested expressions."
+  (let* ((attrs (xml-node-attributes section-node))
+         (name (cdr (assq 'name attrs)))
+         (filename (cdr (assq 'filename attrs)))
+         (line (string-to-number (or (cdr (assq 'line attrs)) "0")))
+         (children (xml-node-children section-node))
+         details)
+    ;; Recursively parse section contents
+    (dolist (child children)
+      (when (consp child)
+        (pcase (car child)
+          ('Expression
+           (push (catch2--parse-expression child) details))
+          ('Exception
+           (push (catch2--parse-exception child) details))
+          ('Failure
+           (push (catch2--parse-failure child) details))
+          ('Section
+           (push (catch2--parse-section child) details)))))
+    `(:type section
+      :name ,name
+      :filename ,filename
+      :line ,line
+      :details ,(nreverse details))))
+
 (defun catch2-parse-testcase (case-node xml-file)
   "Parse a <TestCase> element CASE-NODE from XML-FILE.
 Return plist with all test case attributes and overall result data."
@@ -169,27 +268,37 @@ Return plist with all test case attributes and overall result data."
          (success nil)  ; Default to nil (fail) until we find OverallResult
          (durationInSeconds 0.0)
          (skips 0)
-         (found-overall-result nil))
+         (found-overall-result nil)
+         details)
 
-    ;; Find <OverallResult> element
+    ;; Parse all child elements
     (dolist (child children)
-      (when (and (consp child)
-                 (eq (car child) 'OverallResult))
-        (setq found-overall-result t)
-        (let* ((result-attrs (xml-node-attributes child))
-               (success-attr (cdr (assq 'success result-attrs))))
-          (catch2--debug "OverallResult for '%s': success-attr='%s'" name success-attr)
-          (setq success (string= success-attr "true"))
-          (setq durationInSeconds (string-to-number
-                                   (or (cdr (assq 'durationInSeconds result-attrs)) "0.0")))
-          (setq skips (string-to-number
-                       (or (cdr (assq 'skips result-attrs)) "0"))))))
+      (when (consp child)
+        (pcase (car child)
+          ('OverallResult
+           (setq found-overall-result t)
+           (let* ((result-attrs (xml-node-attributes child))
+                  (success-attr (cdr (assq 'success result-attrs))))
+             (catch2--debug "OverallResult for '%s': success-attr='%s'" name success-attr)
+             (setq success (string= success-attr "true"))
+             (setq durationInSeconds (string-to-number
+                                      (or (cdr (assq 'durationInSeconds result-attrs)) "0.0")))
+             (setq skips (string-to-number
+                          (or (cdr (assq 'skips result-attrs)) "0")))))
+          ('Expression
+           (push (catch2--parse-expression child) details))
+          ('Exception
+           (push (catch2--parse-exception child) details))
+          ('Failure
+           (push (catch2--parse-failure child) details))
+          ('Section
+           (push (catch2--parse-section child) details)))))
 
     (unless found-overall-result
       (catch2--debug "WARNING: No OverallResult found for test case '%s'" name))
 
-    (catch2--debug "Parsed test case: %s (success: %s, durationInSeconds: %.3fs, skips: %d, tags: %S)"
-                   name success durationInSeconds skips tags)
+    (catch2--debug "Parsed test case: %s (success: %s, durationInSeconds: %.3fs, skips: %d, tags: %S, details: %d)"
+                   name success durationInSeconds skips tags (length details))
 
     `(:name ,name
       :success ,success
@@ -199,6 +308,7 @@ Return plist with all test case attributes and overall result data."
       :line ,line
       :durationInSeconds ,durationInSeconds
       :skips ,skips
+      :details ,(nreverse details)
       :raw-attrs ,attrs)))
 
 (defun catch2--sanitize-xml-buffer ()
@@ -590,6 +700,7 @@ Updates the display to reflect the new state."
   ["Actions"
    ("RET" "Open test file" catch2-testcases-open-file)
    ("t" "Open test file" catch2-testcases-open-file)
+   ("d" "Show details" catch2-testcases-show-details)
    ("l" "Open log file" catch2-testcases-open-log)
    ("g" "Reload" catch2-testcases-reload)
    ("q" "Quit" quit-window)])
@@ -616,6 +727,7 @@ Updates the display to reflect the new state."
     (define-key map (kbd "g") #'catch2-testcases-reload)
     (define-key map (kbd "t") #'catch2-testcases-open-file)
     (define-key map (kbd "l") #'catch2-testcases-open-log)
+    (define-key map (kbd "d") #'catch2-testcases-show-details)
     (define-key map (kbd "RET") #'catch2-testcases-open-file)
     (define-key map (kbd "m") #'catch2-testcases-menu)
     (define-key map (kbd "?") #'catch2-testcases-menu)
@@ -845,6 +957,12 @@ CASES is a list of test case plists, SUITE-NAME is the name of the suite."
     (with-current-buffer (get-buffer-create buffer-name)
       (catch2-testcases-mode)
 
+      ;; Store test cases for later access (e.g., showing details)
+      (setq catch2--suite-name suite-name)
+      (setq catch2--testcases (make-hash-table :test 'equal))
+      (dolist (case cases)
+        (puthash (plist-get case :name) case catch2--testcases))
+
       (setq tabulated-list-entries
             (mapcar (lambda (case)
                       (let* ((name (plist-get case :name))
@@ -913,6 +1031,148 @@ Returns the path to the log file or nil if not found."
     (catch2--debug "Found log files: %S" log-files)
 
     (car log-files))) ; Return the first matching log file
+
+(defun catch2--format-detail (detail &optional indent)
+  "Format a single DETAIL item for display.
+INDENT is the indentation level (default 0)."
+  (let ((indent-str (make-string (* (or indent 0) 2) ?\s))
+        (type (plist-get detail :type)))
+    (pcase type
+      ('expression
+       (let ((assertion-type (plist-get detail :assertion-type))
+             (success (plist-get detail :success))
+             (filename (plist-get detail :filename))
+             (line (plist-get detail :line))
+             (original (plist-get detail :original))
+             (expanded (plist-get detail :expanded)))
+         (concat
+          indent-str
+          (propertize (format "[%s] " assertion-type)
+                      'face (if success
+                                '(:foreground "green" :weight bold)
+                              '(:foreground "red" :weight bold)))
+          (propertize (if success "PASSED" "FAILED")
+                      'face (if success
+                                '(:foreground "green")
+                              '(:foreground "red" :weight bold)))
+          "\n"
+          indent-str "  " (propertize "Location: " 'face 'font-lock-keyword-face)
+          (when filename
+            (format "%s:%d" (file-name-nondirectory filename) line))
+          "\n"
+          indent-str "  " (propertize "Expression: " 'face 'font-lock-keyword-face)
+          (or original "N/A") "\n"
+          (when (and expanded (not (string= expanded original)))
+            (concat indent-str "  " (propertize "Expanded: " 'face 'font-lock-keyword-face)
+                    "\n" indent-str "    "
+                    (replace-regexp-in-string "\n" (concat "\n" indent-str "    ") expanded)
+                    "\n")))))
+      ('exception
+       (let ((filename (plist-get detail :filename))
+             (line (plist-get detail :line))
+             (message (plist-get detail :message)))
+         (concat
+          indent-str
+          (propertize "[EXCEPTION] " 'face '(:foreground "orange" :weight bold))
+          "\n"
+          indent-str "  " (propertize "Location: " 'face 'font-lock-keyword-face)
+          (when filename
+            (format "%s:%d" (file-name-nondirectory filename) line))
+          "\n"
+          indent-str "  " (propertize "Message: " 'face 'font-lock-keyword-face)
+          (or message "N/A") "\n")))
+      ('failure
+       (let ((filename (plist-get detail :filename))
+             (line (plist-get detail :line))
+             (message (plist-get detail :message)))
+         (concat
+          indent-str
+          (propertize "[FAILURE] " 'face '(:foreground "red" :weight bold))
+          "\n"
+          indent-str "  " (propertize "Location: " 'face 'font-lock-keyword-face)
+          (when filename
+            (format "%s:%d" (file-name-nondirectory filename) line))
+          "\n"
+          indent-str "  " (propertize "Message: " 'face 'font-lock-keyword-face)
+          (or message "N/A") "\n")))
+      ('section
+       (let ((name (plist-get detail :name))
+             (filename (plist-get detail :filename))
+             (line (plist-get detail :line))
+             (nested-details (plist-get detail :details)))
+         (concat
+          indent-str
+          (propertize (format "SECTION: %s" name) 'face '(:foreground "cyan" :weight bold))
+          (when filename
+            (format " (%s:%d)" (file-name-nondirectory filename) line))
+          "\n"
+          (mapconcat (lambda (d) (catch2--format-detail d (1+ (or indent 0))))
+                     nested-details ""))))
+      (_ (format "%sUnknown detail type: %s\n" indent-str type)))))
+
+(defun catch2--format-test-details (test-case suite-name)
+  "Format TEST-CASE details for display in a buffer.
+SUITE-NAME is the name of the test suite."
+  (let ((name (plist-get test-case :name))
+        (success (plist-get test-case :success))
+        (filename (plist-get test-case :filename))
+        (line (plist-get test-case :line))
+        (duration (plist-get test-case :durationInSeconds))
+        (tags (plist-get test-case :tags))
+        (skips (plist-get test-case :skips))
+        (details (plist-get test-case :details)))
+    (concat
+     (propertize "Test Case Details\n" 'face '(:height 1.3 :weight bold))
+     (make-string 50 ?─) "\n\n"
+     (propertize "Suite: " 'face 'font-lock-keyword-face) suite-name "\n"
+     (propertize "Test:  " 'face 'font-lock-keyword-face) name "\n"
+     (propertize "Status: " 'face 'font-lock-keyword-face)
+     (propertize (if success "PASSED" "FAILED")
+                 'face (if success
+                           '(:foreground "green" :weight bold)
+                         '(:foreground "red" :weight bold)))
+     "\n"
+     (propertize "Duration: " 'face 'font-lock-keyword-face)
+     (format "%.3fs" (or duration 0.0)) "\n"
+     (when filename
+       (concat (propertize "File: " 'face 'font-lock-keyword-face)
+               filename ":" (number-to-string line) "\n"))
+     (when tags
+       (concat (propertize "Tags: " 'face 'font-lock-keyword-face)
+               (mapconcat #'identity tags ", ") "\n"))
+     (when (and skips (> skips 0))
+       (concat (propertize "Skips: " 'face 'font-lock-keyword-face)
+               (number-to-string skips) "\n"))
+     "\n"
+     (if details
+         (concat (propertize "Assertions & Details\n" 'face '(:weight bold))
+                 (make-string 50 ?─) "\n\n"
+                 (mapconcat #'catch2--format-detail details "\n"))
+       (propertize "No assertion details recorded.\n" 'face 'font-lock-comment-face)))))
+
+(define-derived-mode catch2-details-mode special-mode "Catch2 Details"
+  "Major mode for viewing Catch2 test case details."
+  (setq buffer-read-only t)
+  (setq truncate-lines nil)
+  (setq word-wrap t))
+
+(defun catch2-testcases-show-details ()
+  "Show details for the test case at point in a separate buffer."
+  (interactive)
+  (let* ((test-name (tabulated-list-get-id))
+         (test-case (when (and test-name catch2--testcases)
+                      (gethash test-name catch2--testcases)))
+         (suite-name (or catch2--suite-name "Unknown Suite")))
+    (if test-case
+        (let ((buffer-name (format "*Catch2: %s - %s*" suite-name test-name)))
+          (with-current-buffer (get-buffer-create buffer-name)
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (insert (catch2--format-test-details test-case suite-name)))
+            (catch2-details-mode)
+            (goto-char (point-min)))
+          (pop-to-buffer buffer-name '(display-buffer-use-some-window)))
+      (message "No test case at point"))))
 
 (defun catch2-test-summaries ()
   "Test function to generate suite summaries."

@@ -15,6 +15,9 @@ test results via XML output.
   cases.
 - *Test Case Details*: Shows test name, status, duration, source file, line
   number, and tags. Failures are sorted to appear first.
+- *Assertion Details*: Press =d= on a test case to view detailed assertion
+  information including failed expressions, expanded values, exceptions, and
+  section context.
 - *Run Tests*: Press =r= to re-run tests for a suite directly from the UI.
 - *Source Code Integration*:
   - =t= / =RET= – Jump to the test definition in the source file (at the correct line).
@@ -55,6 +58,7 @@ test results via XML output.
 |-------+--------------------------|
 | =RET= | Open test in source file |
 | =t=   | Open test in source file |
+| =d=   | Show test details        |
 | =l=   | Open test log file       |
 | =g=   | Reload current suite     |
 | =m=   | Show transient menu      |
