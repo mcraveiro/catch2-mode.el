@@ -395,8 +395,15 @@ Return plist with all suite attributes and test cases."
           (catch2--debug "Parsed suite: %s with %d test cases" name (length cases))
           suite-plist))
     (error
-     (catch2--debug "Error parsing XML file %s: %s" xml-file (error-message-string err))
-     (error "Failed to parse Catch2 XML file %s: %s" xml-file (error-message-string err)))))
+     (let* ((err-msg (error-message-string err))
+            (short-msg (cond
+                        ((string-match "End of document" err-msg)
+                         "truncated (test may still be running)")
+                        ((string-match "Not Well-Formed" err-msg)
+                         "malformed XML")
+                        (t err-msg))))
+       (catch2--debug "Error parsing XML file %s: %s" xml-file err-msg)
+       (error "Skipping %s: %s" (file-name-nondirectory xml-file) short-msg)))))
 
 ;;
 ;; Post-processing
@@ -1198,7 +1205,7 @@ Return list of suite plists."
           (push (catch2-parse-suite file) suites)
         (error
          (catch2--debug "Error parsing %s: %s" file (error-message-string err))
-         (message "Error parsing %s: %s" file (error-message-string err)))))
+         (message "%s" (error-message-string err)))))
     (nreverse suites)))
 
 (defun catch2 (directory)
